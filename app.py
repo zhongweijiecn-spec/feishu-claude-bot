@@ -458,17 +458,7 @@ def webhook():
     return jsonify({"code": 0})
 
 
-@app.route("/card", methods=["POST"])
-def card_action():
-    data = request.json or {}
-
-    if "challenge" in data and "action" not in data:
-        return jsonify({"challenge": data["challenge"]})
-
-    action  = data.get("action", {}).get("value", {})
-    chat_id = data.get("open_chat_id", "")
-    msg_id  = data.get("open_message_id", "")
-
+def handle_card_action(action, chat_id, msg_id):
     act = action.get("action")
 
     if act == "rewrite":
@@ -516,13 +506,10 @@ def card_action():
         content = get_topic_content(record_id, cache_key, topic_idx)
         if not content:
             update_card(msg_id, card_result("已过期", "请重新发起头脑风暴"))
-            return jsonify({"code": 0})
+            return
 
         update_card(msg_id, card_loading("正在完善选题..."))
-        threading.Thread(
-            target=do_develop_send,
-            args=(chat_id, audience, content)
-        ).start()
+        threading.Thread(target=do_develop_send, args=(chat_id, audience, content)).start()
 
     elif act == "generate_script":
         record_id = action.get("record_id", "")
@@ -531,14 +518,24 @@ def card_action():
         content = get_develop_content(record_id, cache_key)
         if not content:
             update_card(msg_id, card_result("已过期", "请重新完善选题"))
-            return jsonify({"code": 0})
+            return
 
         update_card(msg_id, card_loading("正在生成脚本..."))
-        threading.Thread(
-            target=do_generate_script,
-            args=(chat_id, content)
-        ).start()
+        threading.Thread(target=do_generate_script, args=(chat_id, content)).start()
 
+
+@app.route("/card", methods=["POST"])
+def card_action():
+    data = request.json or {}
+
+    if "challenge" in data and "action" not in data:
+        return jsonify({"challenge": data["challenge"]})
+
+    action  = data.get("action", {}).get("value", {})
+    chat_id = data.get("open_chat_id", "")
+    msg_id  = data.get("open_message_id", "")
+
+    threading.Thread(target=handle_card_action, args=(action, chat_id, msg_id)).start()
     return jsonify({"code": 0})
 
 
