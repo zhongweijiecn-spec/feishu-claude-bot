@@ -461,8 +461,8 @@ def webhook():
 def card_action():
     data = request.json or {}
 
-    if data.get("type") == "url_verification":
-        return jsonify({"challenge": data.get("challenge", "")})
+    if "challenge" in data and "action" not in data:
+        return jsonify({"challenge": data["challenge"]})
 
     action  = data.get("action", {}).get("value", {})
     chat_id = data.get("open_chat_id", "")
