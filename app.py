@@ -117,13 +117,14 @@ def get_tenant_token():
 
 def send_card(chat_id, card):
     token = get_tenant_token()
-    requests.post(
+    r = requests.post(
         "https://open.feishu.cn/open-apis/im/v1/messages",
         params={"receive_id_type": "chat_id"},
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={"receive_id": chat_id, "msg_type": "interactive",
               "content": json.dumps(card)}
     )
+    print(f"[send_card] chat_id={chat_id} status={r.status_code} body={r.text[:300]}")
 
 def update_card(message_id, card):
     token = get_tenant_token()
