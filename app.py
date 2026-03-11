@@ -459,7 +459,11 @@ def webhook():
 
 @app.route("/card", methods=["POST"])
 def card_action():
-    data    = request.json
+    data = request.json or {}
+
+    if data.get("type") == "url_verification":
+        return jsonify({"challenge": data.get("challenge", "")})
+
     action  = data.get("action", {}).get("value", {})
     chat_id = data.get("open_chat_id", "")
     msg_id  = data.get("open_message_id", "")
