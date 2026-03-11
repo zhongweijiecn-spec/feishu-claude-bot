@@ -91,8 +91,8 @@ TEMPLATES_DEAL = {
     "行业观点":  "话题：\n地区（可选）：",
 }
 
-TEMPLATE_DEVELOP_FARM = "话题方向：\n已有想法（没有就写"无"）：\n背景信息（产品/场景/地区，可选）："
-TEMPLATE_DEVELOP_DEAL = "话题方向：\n已有想法（没有就写"无"）：\n地区（可选，默认江浙沪皖豫）："
+TEMPLATE_DEVELOP_FARM = "话题方向：\n已有想法（没有就写「无」）：\n背景信息（产品/场景/地区，可选）："
+TEMPLATE_DEVELOP_DEAL = "话题方向：\n已有想法（没有就写「无」）：\n地区（可选，默认江浙沪皖豫）："
 
 # ── 解析头脑风暴输出 ─────────────────────────────────────────
 def parse_brainstorm(text):
