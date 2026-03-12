@@ -48,10 +48,11 @@ SKILL_BRAINSTORM_DEAL  = load_skill("brainstorm-dealers")
 SKILL_DEVELOP          = load_skill("develop-topic")
 
 # ── 飞书多维表格配置 ─────────────────────────────────────────
-BITABLE_APP_TOKEN    = os.environ.get("BITABLE_APP_TOKEN", "")
-BITABLE_TOPIC_TABLE  = os.environ.get("BITABLE_TOPIC_TABLE_ID", "")
-BITABLE_DEVELOP_TABLE = os.environ.get("BITABLE_DEVELOP_TABLE_ID", "")
-USE_BITABLE = bool(BITABLE_APP_TOKEN and BITABLE_TOPIC_TABLE)
+BITABLE_APP_TOKEN     = os.environ.get("BITABLE_APP_TOKEN", "")
+BITABLE_TOPIC_TABLE   = os.environ.get("BITABLE_TOPIC_TABLE_ID", "")   # 头脑风暴
+BITABLE_DEVELOP_TABLE = os.environ.get("BITABLE_DEVELOP_TABLE_ID", "") # 完善选题
+BITABLE_REWRITE_TABLE = os.environ.get("BITABLE_REWRITE_TABLE_ID", "") # 改文案
+USE_BITABLE = bool(BITABLE_APP_TOKEN)
 
 # ── 会话状态 ─────────────────────────��───────────────────────
 pending_states = {}
@@ -164,6 +165,28 @@ def bitable_get(table_id, record_id):
     )
     return r.json().get("data", {}).get("record", {}).get("fields", {})
 
+def parse_extra_output(text):
+    """从 AI 输出的 --- 分隔线后，解析内部标题和标签字段"""
+    result = {}
+    parts = text.rsplit('---', 1)
+    if len(parts) < 2:
+        return result
+    extra = parts[1]
+
+    title_match = re.search(r'\*\*内部标题\*\*[^\n]*\n((?:\s*-.+\n?)+)', extra)
+    if title_match:
+        titles = re.findall(r'^\s*-\s*(.+)', title_match.group(1), re.MULTILINE)
+        cleaned = [t.strip() for t in titles if t.strip()]
+        if cleaned:
+            result['内部标题'] = '\n'.join(cleaned[:3])
+
+    for field in ['农作物', '内容类型', '农事作业', '具体问题']:
+        m = re.search(rf'{field}[：:]\s*(.+)', extra)
+        if m and m.group(1).strip():
+            result[field] = m.group(1).strip()
+
+    return result
+
 def save_topics(topics, audience, content_type, session_id):
     """把 3 个选题写入多维表格，返回 [record_id, ...]"""
     record_ids = []
@@ -178,10 +201,6 @@ def save_topics(topics, audience, content_type, session_id):
         record_ids.append(rid)
     return record_ids
 
-def save_develop(content):
-    """把完善结果写入多维表格，返回 record_id"""
-    return bitable_create(BITABLE_DEVELOP_TABLE, {"完善内容": content})
-
 def get_topic_content(record_id, cache_key, topic_idx):
     """优先从 Bitable 读，降级到内存缓存"""
     if USE_BITABLE and record_id:
@@ -195,10 +214,10 @@ def get_topic_content(record_id, cache_key, topic_idx):
         return topics[topic_idx][1]
     return None
 
-def get_develop_content(record_id, cache_key):
+def get_develop_content(record_id, cache_key, table_id=None):
     """优先从 Bitable 读，降级到内存缓存"""
-    if USE_BITABLE and record_id:
-        fields = bitable_get(BITABLE_TOPIC_TABLE, record_id)
+    if USE_BITABLE and record_id and table_id:
+        fields = bitable_get(table_id, record_id)
         content = fields.get("完善内容", "")
         if content:
             return content
@@ -311,7 +330,7 @@ def card_brainstorm_result(header, full_text, topics, cache_key, audience, recor
     elements.append({"tag": "action", "actions": buttons})
     return {"config": {"wide_screen_mode": True}, "elements": elements}
 
-def card_develop_result(header, content, cache_key, record_id):
+def card_develop_result(header, content, cache_key, record_id, table_id=""):
     """完善选题结果，带生成脚本按钮"""
     return {
         "config": {"wide_screen_mode": True},
@@ -326,7 +345,8 @@ def card_develop_result(header, content, cache_key, record_id):
                  "type": "primary",
                  "value": {"action": "generate_script",
                            "cache_key": cache_key,
-                           "record_id": record_id}}
+                           "record_id": record_id,
+                           "table_id": table_id}}
             ]}
         ]
     }
@@ -341,6 +361,16 @@ def do_rewrite_send(chat_id, text):
             + draft
         )
         result = ai_call(SKILL_HUMANIZER, humanizer_input)
+
+        if USE_BITABLE and BITABLE_REWRITE_TABLE:
+            try:
+                extra = parse_extra_output(result)
+                fields = {"原文": text, "改后文案": result}
+                fields.update(extra)
+                bitable_create(BITABLE_REWRITE_TABLE, fields)
+            except Exception as e:
+                print(f"[bitable] rewrite save failed: {e}", flush=True)
+
         send_card(chat_id, card_result("改后文案", result))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
@@ -373,8 +403,10 @@ def do_brainstorm_send(chat_id, audience, content_type, user_input):
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_develop_send(chat_id, audience, user_input, topic_record_id=""):
+def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=None):
     try:
+        if table_id is None:
+            table_id = BITABLE_DEVELOP_TABLE
         label  = "种植户" if audience == "farmer" else "经销商"
         prompt = f"受众：面向{label}\n\n{user_input}"
         result = ai_call(SKILL_DEVELOP, prompt)
@@ -384,23 +416,25 @@ def do_develop_send(chat_id, audience, user_input, topic_record_id=""):
         cache_set(cache_key, result)
 
         record_id = topic_record_id
-        if USE_BITABLE:
+        if USE_BITABLE and table_id:
             try:
+                extra = parse_extra_output(result)
                 if record_id:
-                    bitable_update(BITABLE_TOPIC_TABLE, record_id, {"完善内容": result})
+                    fields = {"完善内容": result}
+                    fields.update(extra)
+                    bitable_update(table_id, record_id, fields)
                 else:
-                    record_id = bitable_create(BITABLE_TOPIC_TABLE, {
-                        "完善内容": result,
-                        "受众": label,
-                    })
+                    fields = {"完善内容": result, "受众": label}
+                    fields.update(extra)
+                    record_id = bitable_create(table_id, fields)
             except Exception as e:
                 print(f"[bitable] develop failed: {e}", flush=True)
 
-        send_card(chat_id, card_develop_result(header, result, cache_key, record_id))
+        send_card(chat_id, card_develop_result(header, result, cache_key, record_id, table_id))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_generate_script(chat_id, develop_content, record_id=""):
+def do_generate_script(chat_id, develop_content, record_id="", table_id=None):
     try:
         draft = ai_call(SKILL_VIDEO_REWRITE, develop_content)
         humanizer_input = (
@@ -410,9 +444,9 @@ def do_generate_script(chat_id, develop_content, record_id=""):
         )
         result = ai_call(SKILL_HUMANIZER, humanizer_input)
 
-        if USE_BITABLE and record_id:
+        if USE_BITABLE and record_id and table_id:
             try:
-                bitable_update(BITABLE_TOPIC_TABLE, record_id, {"最终脚本": result})
+                bitable_update(table_id, record_id, {"最终脚本": result})
             except Exception as e:
                 print(f"[bitable] script save failed: {e}", flush=True)
 
@@ -535,19 +569,27 @@ def handle_card_action(action, chat_id, msg_id):
             return
 
         update_card(msg_id, card_loading("正在完善选题..."))
-        threading.Thread(target=do_develop_send, args=(chat_id, audience, content, record_id)).start()
+        # 头脑风暴链路：完善和脚本都写入头脑风暴表
+        threading.Thread(
+            target=do_develop_send,
+            args=(chat_id, audience, content, record_id, BITABLE_TOPIC_TABLE)
+        ).start()
 
     elif act == "generate_script":
         record_id = action.get("record_id", "")
         cache_key = action.get("cache_key", "")
+        table_id  = action.get("table_id", BITABLE_DEVELOP_TABLE)
 
-        content = get_develop_content(record_id, cache_key)
+        content = get_develop_content(record_id, cache_key, table_id)
         if not content:
             update_card(msg_id, card_result("已过期", "请重新完善选题"))
             return
 
         update_card(msg_id, card_loading("正在生成脚本..."))
-        threading.Thread(target=do_generate_script, args=(chat_id, content, record_id)).start()
+        threading.Thread(
+            target=do_generate_script,
+            args=(chat_id, content, record_id, table_id)
+        ).start()
 
 
 @app.route("/card", methods=["POST"])
