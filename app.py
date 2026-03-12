@@ -142,6 +142,7 @@ def bitable_create(table_id, fields):
         headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
         json={"fields": fields}
     )
+    print(f"[bitable_create] status={r.status_code} body={r.text[:200]}", flush=True)
     return r.json().get("data", {}).get("record", {}).get("record_id", "")
 
 def bitable_get(table_id, record_id):
