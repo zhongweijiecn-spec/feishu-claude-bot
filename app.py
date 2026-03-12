@@ -416,7 +416,9 @@ def do_generate_script(chat_id, develop_content, record_id=""):
             except Exception as e:
                 print(f"[bitable] script save failed: {e}", flush=True)
 
-        deliverable = f"{develop_content}\n\n---\n\n**【最终脚本】**\n\n{result}"
+        develop_clean = re.sub(r'\n{3,}', '\n\n', develop_content).strip()
+        script_clean  = re.sub(r'\n{3,}', '\n\n', result).strip()
+        deliverable = f"{develop_clean}\n\n---\n**【最终脚本】**\n{script_clean}"
         send_card(chat_id, card_result("完整交付物", deliverable))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
