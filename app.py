@@ -57,7 +57,12 @@ USE_BITABLE = bool(BITABLE_APP_TOKEN)
 # ── 飞书知识库配置 ─────────────────────────────────────────────
 FEISHU_WIKI_PARENT_NODE = os.environ.get("FEISHU_WIKI_PARENT_NODE", "")
 FEISHU_BASE_URL         = os.environ.get("FEISHU_BASE_URL", "")
+FEISHU_WIKI_SPACE_ID    = os.environ.get("FEISHU_WIKI_SPACE_ID", "")   # 可选，自动探测失败时手填
 USE_WIKI = bool(FEISHU_WIKI_PARENT_NODE and FEISHU_BASE_URL)
+
+# ── 图片 API 配置 ─────────────────────────────────────────────
+UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
+PEXELS_API_KEY      = os.environ.get("PEXELS_API_KEY", "")
 _wiki_space_id = None
 
 # ── 会话状态 ─────────────────────────��───────────────────────
@@ -172,18 +177,23 @@ def bitable_get(table_id, record_id):
     return r.json().get("data", {}).get("record", {}).get("fields", {})
 
 def get_wiki_space_id():
-    """从父节点 token 获取 space_id（进程内缓存）"""
+    """获取 space_id：优先用环境变量，否则调 list spaces 接口自动探测（进程内缓存）"""
     global _wiki_space_id
     if _wiki_space_id:
         return _wiki_space_id
+    if FEISHU_WIKI_SPACE_ID:
+        _wiki_space_id = FEISHU_WIKI_SPACE_ID
+        return _wiki_space_id
     token = get_tenant_token()
     r = requests.get(
-        "https://open.feishu.cn/open-apis/wiki/v2/nodes",
-        params={"token": FEISHU_WIKI_PARENT_NODE},
+        "https://open.feishu.cn/open-apis/wiki/v2/spaces",
+        params={"page_size": 10},
         headers={"Authorization": f"Bearer {token}"}
     )
-    print(f"[wiki] get_space_id status={r.status_code} body={r.text[:200]}", flush=True)
-    _wiki_space_id = r.json().get("data", {}).get("node", {}).get("space_id", "")
+    print(f"[wiki] list_spaces status={r.status_code} body={r.text[:300]}", flush=True)
+    items = r.json().get("data", {}).get("items", [])
+    if items:
+        _wiki_space_id = items[0].get("space_id", "")
     return _wiki_space_id
 
 def _text_block(content):
@@ -225,7 +235,7 @@ def build_doc_blocks(develop_content, script_content=""):
                 blocks.append(_text_block(line.strip()))
     return blocks
 
-def create_wiki_doc(title, blocks):
+def create_wiki_doc(title, blocks, image_query=None):
     """在知识库指定节点下创建文档，返回 URL 或空字符串"""
     try:
         space_id = get_wiki_space_id()
@@ -252,7 +262,20 @@ def create_wiki_doc(title, blocks):
         if not doc_token:
             return ""
 
-        # 2. 获取文档 page 块 id
+        # 2. 尝试搜索并上传封面图
+        if image_query and (PEXELS_API_KEY or UNSPLASH_ACCESS_KEY):
+            try:
+                img_url = get_image_url(image_query)
+                if img_url:
+                    img_resp = requests.get(img_url, timeout=15)
+                    if img_resp.status_code == 200:
+                        file_token = upload_doc_image(img_resp.content, "cover.jpg", doc_token)
+                        if file_token:
+                            blocks = [_image_block(file_token)] + list(blocks)
+            except Exception as e:
+                print(f"[img] add cover failed: {e}", flush=True)
+
+        # 3. 获取文档 page 块 id
         r2 = requests.get(
             f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_token}/blocks",
             headers={"Authorization": f"Bearer {token}"}
@@ -263,7 +286,7 @@ def create_wiki_doc(title, blocks):
                 page_block_id = blk.get("block_id", "")
                 break
 
-        # 3. 写入内容块
+        # 4. 写入内容块
         if blocks and page_block_id:
             r3 = requests.post(
                 f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_token}/blocks/{page_block_id}/children",
@@ -276,6 +299,79 @@ def create_wiki_doc(title, blocks):
     except Exception as e:
         print(f"[wiki] create_wiki_doc failed: {e}", flush=True)
         return ""
+
+# ── 图片辅助 ──────────────────────────────────────────────────
+_CROP_EN = {
+    '水稻': 'rice', '小麦': 'wheat', '玉米': 'corn', '大豆': 'soybean',
+    '棉花': 'cotton', '花生': 'peanut', '油菜': 'rapeseed', '甘蔗': 'sugarcane',
+    '蔬菜': 'vegetables', '果树': 'fruit trees', '草莓': 'strawberry',
+    '苹果': 'apple orchard', '葡萄': 'vineyard', '柑橘': 'citrus',
+    '番茄': 'tomato', '辣椒': 'pepper', '黄瓜': 'cucumber',
+}
+
+def _crop_to_query(extra):
+    crop = extra.get('农作物', '')
+    for zh, en in _CROP_EN.items():
+        if zh in crop:
+            return f"{en} farming agriculture"
+    return "agriculture farming China crops"
+
+def get_image_url(query):
+    """搜索图片，优先 Pexels，备用 Unsplash，返回 URL 或 None"""
+    # Pexels
+    if PEXELS_API_KEY:
+        try:
+            r = requests.get(
+                "https://api.pexels.com/v1/search",
+                params={"query": query, "per_page": 1, "orientation": "landscape"},
+                headers={"Authorization": PEXELS_API_KEY},
+                timeout=10
+            )
+            photos = r.json().get("photos", [])
+            if photos:
+                return photos[0]["src"]["large"]
+        except Exception as e:
+            print(f"[pexels] search failed: {e}", flush=True)
+    # Unsplash 备用
+    if UNSPLASH_ACCESS_KEY:
+        try:
+            r = requests.get(
+                "https://api.unsplash.com/search/photos",
+                params={"query": query, "per_page": 1, "orientation": "landscape"},
+                headers={"Authorization": f"Client-ID {UNSPLASH_ACCESS_KEY}"},
+                timeout=10
+            )
+            results = r.json().get("results", [])
+            if results:
+                return results[0]["urls"]["regular"]
+        except Exception as e:
+            print(f"[unsplash] search failed: {e}", flush=True)
+    return None
+
+def upload_doc_image(image_bytes, filename, doc_token):
+    """把图片上传到指定飞书文档，返回 file_token"""
+    token = get_tenant_token()
+    r = requests.post(
+        "https://open.feishu.cn/open-apis/drive/v1/medias/upload_all",
+        headers={"Authorization": f"Bearer {token}"},
+        data={
+            "file_name": filename,
+            "parent_type": "docx_image",
+            "parent_node": doc_token,
+            "size": str(len(image_bytes)),
+        },
+        files={"file": (filename, image_bytes, "image/jpeg")},
+        timeout=30
+    )
+    print(f"[drive] upload_image status={r.status_code} body={r.text[:200]}", flush=True)
+    return r.json().get("data", {}).get("file_token", "")
+
+def _image_block(file_token):
+    return {
+        "block_type": 27,
+        "image": {"token": file_token, "width": 800, "height": 450}
+    }
+
 
 def parse_extra_output(text):
     """从 AI 输出的 --- 分隔线后，解析内部标题和标签字段"""
@@ -486,12 +582,13 @@ def do_rewrite_send(chat_id, text):
         doc_url = ""
         if USE_WIKI:
             try:
+                extra = parse_extra_output(result)
                 title  = extract_doc_title(result)
                 blocks = [_heading2_block("【脚本文案】")]
                 for line in result.strip().split('\n'):
                     if line.strip():
                         blocks.append(_text_block(line.strip()))
-                doc_url = create_wiki_doc(title, blocks)
+                doc_url = create_wiki_doc(title, blocks, image_query=_crop_to_query(extra))
             except Exception as e:
                 print(f"[wiki] rewrite doc failed: {e}", flush=True)
 
@@ -580,9 +677,10 @@ def do_generate_script(chat_id, develop_content, record_id="", table_id=None):
         doc_url = ""
         if USE_WIKI:
             try:
+                extra  = parse_extra_output(develop_content)
                 title  = extract_doc_title(develop_content)
                 blocks = build_doc_blocks(develop_content, result)
-                doc_url = create_wiki_doc(title, blocks)
+                doc_url = create_wiki_doc(title, blocks, image_query=_crop_to_query(extra))
             except Exception as e:
                 print(f"[wiki] script doc failed: {e}", flush=True)
 
