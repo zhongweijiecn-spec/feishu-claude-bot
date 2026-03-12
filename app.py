@@ -51,7 +51,7 @@ SKILL_DEVELOP          = load_skill("develop-topic")
 BITABLE_APP_TOKEN    = os.environ.get("BITABLE_APP_TOKEN", "")
 BITABLE_TOPIC_TABLE  = os.environ.get("BITABLE_TOPIC_TABLE_ID", "")
 BITABLE_DEVELOP_TABLE = os.environ.get("BITABLE_DEVELOP_TABLE_ID", "")
-USE_BITABLE = bool(BITABLE_APP_TOKEN and BITABLE_TOPIC_TABLE and BITABLE_DEVELOP_TABLE)
+USE_BITABLE = bool(BITABLE_APP_TOKEN and BITABLE_TOPIC_TABLE)
 
 # ── 会话状态 ─────────────────────────��───────────────────────
 pending_states = {}
@@ -145,6 +145,16 @@ def bitable_create(table_id, fields):
     print(f"[bitable_create] status={r.status_code} body={r.text[:200]}", flush=True)
     return r.json().get("data", {}).get("record", {}).get("record_id", "")
 
+def bitable_update(table_id, record_id, fields):
+    """更新一条记录的字段"""
+    token = get_tenant_token()
+    r = requests.put(
+        f"https://open.feishu.cn/open-apis/bitable/v1/apps/{BITABLE_APP_TOKEN}/tables/{table_id}/records/{record_id}",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"fields": fields}
+    )
+    print(f"[bitable_update] status={r.status_code} body={r.text[:200]}", flush=True)
+
 def bitable_get(table_id, record_id):
     """读取一条记录的 fields"""
     token = get_tenant_token()
@@ -188,7 +198,7 @@ def get_topic_content(record_id, cache_key, topic_idx):
 def get_develop_content(record_id, cache_key):
     """优先从 Bitable 读，降级到内存缓存"""
     if USE_BITABLE and record_id:
-        fields = bitable_get(BITABLE_DEVELOP_TABLE, record_id)
+        fields = bitable_get(BITABLE_TOPIC_TABLE, record_id)
         content = fields.get("完善内容", "")
         if content:
             return content
@@ -363,7 +373,7 @@ def do_brainstorm_send(chat_id, audience, content_type, user_input):
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_develop_send(chat_id, audience, user_input):
+def do_develop_send(chat_id, audience, user_input, topic_record_id=""):
     try:
         label  = "种植户" if audience == "farmer" else "经销商"
         prompt = f"受众：面向{label}\n\n{user_input}"
@@ -373,18 +383,24 @@ def do_develop_send(chat_id, audience, user_input):
         cache_key = make_cache_key(chat_id)
         cache_set(cache_key, result)
 
-        record_id = ""
+        record_id = topic_record_id
         if USE_BITABLE:
             try:
-                record_id = save_develop(result)
+                if record_id:
+                    bitable_update(BITABLE_TOPIC_TABLE, record_id, {"完善内容": result})
+                else:
+                    record_id = bitable_create(BITABLE_TOPIC_TABLE, {
+                        "完善内容": result,
+                        "受众": label,
+                    })
             except Exception as e:
-                print(f"[bitable] save_develop failed: {e}", flush=True)
+                print(f"[bitable] develop failed: {e}", flush=True)
 
         send_card(chat_id, card_develop_result(header, result, cache_key, record_id))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_generate_script(chat_id, develop_content):
+def do_generate_script(chat_id, develop_content, record_id=""):
     try:
         draft = ai_call(SKILL_VIDEO_REWRITE, develop_content)
         humanizer_input = (
@@ -393,7 +409,15 @@ def do_generate_script(chat_id, develop_content):
             + draft
         )
         result = ai_call(SKILL_HUMANIZER, humanizer_input)
-        send_card(chat_id, card_result("生成脚本", result))
+
+        if USE_BITABLE and record_id:
+            try:
+                bitable_update(BITABLE_TOPIC_TABLE, record_id, {"最终脚本": result})
+            except Exception as e:
+                print(f"[bitable] script save failed: {e}", flush=True)
+
+        deliverable = f"{develop_content}\n\n---\n\n**【最终脚本】**\n\n{result}"
+        send_card(chat_id, card_result("完整交付物", deliverable))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
@@ -509,7 +533,7 @@ def handle_card_action(action, chat_id, msg_id):
             return
 
         update_card(msg_id, card_loading("正在完善选题..."))
-        threading.Thread(target=do_develop_send, args=(chat_id, audience, content)).start()
+        threading.Thread(target=do_develop_send, args=(chat_id, audience, content, record_id)).start()
 
     elif act == "generate_script":
         record_id = action.get("record_id", "")
@@ -521,7 +545,7 @@ def handle_card_action(action, chat_id, msg_id):
             return
 
         update_card(msg_id, card_loading("正在生成脚本..."))
-        threading.Thread(target=do_generate_script, args=(chat_id, content)).start()
+        threading.Thread(target=do_generate_script, args=(chat_id, content, record_id)).start()
 
 
 @app.route("/card", methods=["POST"])
