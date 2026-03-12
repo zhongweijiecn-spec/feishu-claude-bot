@@ -31,8 +31,7 @@ else:
     def ai_call(system, user_text):
         resp = _ai.chat.completions.create(
             model=AI_MODEL, max_tokens=2000,
-            messages=[{"role": "system", "content": system},
-                      {"role": "user", "content": user_text}]
+            messages=[{"role": "user", "content": f"{system}\n\n---\n\n{user_text}"}]
         )
         return resp.choices[0].message.content
 
