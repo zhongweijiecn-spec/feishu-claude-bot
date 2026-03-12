@@ -350,8 +350,8 @@ def do_brainstorm_send(chat_id, audience, content_type, user_input):
         if USE_BITABLE and topics:
             try:
                 record_ids = save_topics(topics, audience, content_type, cache_key)
-            except Exception:
-                pass  # Bitable 写入失败时降级到缓存
+            except Exception as e:
+                print(f"[bitable] save_topics failed: {e}", flush=True)
 
         if topics:
             send_card(chat_id, card_brainstorm_result(
@@ -376,8 +376,8 @@ def do_develop_send(chat_id, audience, user_input):
         if USE_BITABLE:
             try:
                 record_id = save_develop(result)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[bitable] save_develop failed: {e}", flush=True)
 
         send_card(chat_id, card_develop_result(header, result, cache_key, record_id))
     except Exception as e:
