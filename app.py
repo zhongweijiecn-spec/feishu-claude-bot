@@ -280,11 +280,13 @@ def create_wiki_doc(title, blocks, image_query=None):
             f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_token}/blocks",
             headers={"Authorization": f"Bearer {token}"}
         )
+        print(f"[wiki] get_blocks status={r2.status_code} body={r2.text[:300]}", flush=True)
         page_block_id = ""
         for blk in r2.json().get("data", {}).get("items", []):
             if blk.get("block_type") == 1:
                 page_block_id = blk.get("block_id", "")
                 break
+        print(f"[wiki] page_block_id={page_block_id!r} blocks_count={len(blocks)}", flush=True)
 
         # 4. 写入内容块
         if blocks and page_block_id:
