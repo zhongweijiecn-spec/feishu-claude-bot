@@ -290,12 +290,13 @@ def create_wiki_doc(title, blocks, image_query=None):
 
         # 4. 写入内容块
         if blocks and page_block_id:
+            print(f"[wiki] sending blocks sample={json.dumps(blocks[:2], ensure_ascii=False)}", flush=True)
             r3 = requests.post(
                 f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_token}/blocks/{page_block_id}/children",
                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
                 json={"children": blocks, "index": 0}
             )
-            print(f"[wiki] add_blocks status={r3.status_code} body={r3.text[:200]}", flush=True)
+            print(f"[wiki] add_blocks status={r3.status_code} body={r3.text[:500]}", flush=True)
 
         return f"{FEISHU_BASE_URL}/wiki/{node_token}"
     except Exception as e:
