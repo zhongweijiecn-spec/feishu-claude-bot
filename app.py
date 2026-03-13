@@ -199,13 +199,13 @@ def get_wiki_space_id():
 def _text_block(content):
     return {
         "block_type": 2,
-        "text": {"elements": [{"text_run": {"content": content}}], "style": {}}
+        "text": {"elements": [{"text_run": {"content": content}}], "style": {"align": 1}}
     }
 
 def _heading2_block(content):
     return {
         "block_type": 4,
-        "heading2": {"elements": [{"text_run": {"content": content}}], "style": {}}
+        "heading2": {"elements": [{"text_run": {"content": content}}], "style": {"align": 1}}
     }
 
 def extract_doc_title(text):
@@ -573,7 +573,7 @@ def do_rewrite_send(chat_id, text):
         if USE_BITABLE and BITABLE_REWRITE_TABLE:
             try:
                 extra = parse_extra_output(result)
-                fields = {"原文": text, "改后文案": result}
+                fields = {"原始文案": text, "改写结果": result}
                 fields.update(extra)
                 bitable_create(BITABLE_REWRITE_TABLE, fields)
             except Exception as e:
