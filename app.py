@@ -221,7 +221,7 @@ def build_doc_blocks(develop_content, script_content=""):
     """把完善选题框架 + 最终脚本转成 docx 块列表"""
     blocks = []
     main_text = develop_content.split('\n---')[0].strip()
-    for name in ['为什么拍这条', '切入角度', '内容结构', '标题建议']:
+    for name in ['为什么拍这条', '切入角度', '内容结构']:
         m = re.search(rf'【{name}[^】]*】\s*\n(.*?)(?=【[^】]*】|\Z)', main_text, re.DOTALL)
         if m:
             blocks.append(_heading2_block(f'【{name}】'))
