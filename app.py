@@ -288,19 +288,21 @@ def create_wiki_doc(title, blocks, image_query=None):
                 break
         print(f"[wiki] page_block_id={page_block_id!r} blocks_count={len(blocks)}", flush=True)
 
-        # 4. 写入内容块（每批最多 50 个）
+        # 4. 写入内容块（每批最多 50 个，逐批 append）
         if blocks and page_block_id:
+            inserted = 0
             for i in range(0, len(blocks), 50):
                 chunk = blocks[i:i+50]
                 r3 = requests.post(
                     f"https://open.feishu.cn/open-apis/docx/v1/documents/{doc_token}/blocks/{page_block_id}/children",
                     headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                    json={"children": chunk, "index": i}
+                    json={"children": chunk, "index": inserted}
                 )
                 print(f"[wiki] add_blocks batch={i} status={r3.status_code}", flush=True)
                 if r3.status_code != 200:
                     print(f"[wiki] add_blocks error body={r3.text[:300]}", flush=True)
                     break
+                inserted += len(chunk)
 
         return f"{FEISHU_BASE_URL}/wiki/{node_token}"
     except Exception as e:
@@ -376,7 +378,7 @@ def upload_doc_image(image_bytes, filename, doc_token):
 def _image_block(file_token):
     return {
         "block_type": 27,
-        "image": {"token": file_token}
+        "image": {"token": file_token, "align": 1}
     }
 
 
