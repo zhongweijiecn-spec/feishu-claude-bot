@@ -58,7 +58,7 @@ USE_BITABLE = bool(BITABLE_APP_TOKEN)
 FEISHU_WIKI_PARENT_NODE = os.environ.get("FEISHU_WIKI_PARENT_NODE", "")
 FEISHU_BASE_URL         = os.environ.get("FEISHU_BASE_URL", "")
 FEISHU_WIKI_SPACE_ID    = os.environ.get("FEISHU_WIKI_SPACE_ID", "")   # 可选，自动探测失败时手填
-USE_WIKI = bool(FEISHU_WIKI_PARENT_NODE and FEISHU_BASE_URL)
+USE_WIKI = False  # 暂时关闭，待调整
 
 # ── 图片 API 配置 ─────────────────────────────────────────────
 UNSPLASH_ACCESS_KEY = os.environ.get("UNSPLASH_ACCESS_KEY", "")
