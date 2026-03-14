@@ -85,6 +85,29 @@ def cache_get(key):
 def make_cache_key(chat_id):
     return f"{chat_id}_{int(time.time())}"
 
+# ── 对话 system prompt ───────────────────────────────────────
+SYSTEM_PROMPT_CHAT = """你是一个 AI 助手，服务对象是 Michael，农资传媒公司联合创始人。
+
+**公司背景**
+- 农资传媒公司，农资平台旗下子公司
+- 主营：AI 智能体开发、短视频内容制作（策划/脚本/剪辑/拍摄指导）
+- 团队约 10 人，含编导、剪辑、业务员
+
+**Michael 的角色**
+- 联合创始人 / 合股东，同时兼顾农资平台业务
+- 产品 + 技术 + 运营三位一体
+- 当前重心：对客小程序开发、公司业务流程搭建、AI 文案/剪辑智能体开发、客户增长
+
+**个人信息**
+- 性别：男，出生于 1987 年
+- 身高：176cm，体重：72.5kg
+- 所在城市：江苏溧阳
+- 饮食偏好：喜欢吃辣
+- 健康状况：无特殊
+
+**回复要求**
+- 中文回复，简洁直接，不废话，不用 emoji"""
+
 # ── 输入模板 ─────────────────────────────────────────────────
 TEMPLATES_FARM = {
     "产品推广":  "产品：\n卖点：\n地区：",
@@ -125,6 +148,16 @@ def get_tenant_token():
         json={"app_id": FEISHU_APP_ID, "app_secret": FEISHU_APP_SECRET}
     )
     return r.json()["tenant_access_token"]
+
+def send_text(chat_id, text):
+    token = get_tenant_token()
+    requests.post(
+        "https://open.feishu.cn/open-apis/im/v1/messages",
+        params={"receive_id_type": "chat_id"},
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"receive_id": chat_id, "msg_type": "text",
+              "content": json.dumps({"text": text})}
+    )
 
 def send_card(chat_id, card):
     token = get_tenant_token()
@@ -570,6 +603,13 @@ def card_develop_result(header, content, cache_key, record_id, table_id=""):
     }
 
 # ── 后台任务 ─────────────────────────────────────────────────
+def do_chat_reply(chat_id, text):
+    try:
+        result = ai_call(SYSTEM_PROMPT_CHAT, text)
+        send_text(chat_id, result)
+    except Exception as e:
+        send_text(chat_id, f"出错了：{e}")
+
 def do_rewrite_send(chat_id, text):
     try:
         draft = ai_call(SKILL_VIDEO_REWRITE, text)
@@ -760,7 +800,10 @@ def webhook():
 
         return jsonify({"code": 0})
 
-    send_card(chat_id, card_main_menu())
+    if text == "文案":
+        send_card(chat_id, card_main_menu())
+    else:
+        threading.Thread(target=do_chat_reply, args=(chat_id, text)).start()
     return jsonify({"code": 0})
 
 
