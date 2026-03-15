@@ -217,6 +217,24 @@ def bitable_get(table_id, record_id):
     )
     return r.json().get("data", {}).get("record", {}).get("fields", {})
 
+def bitable_search_latest(table_id, chat_id):
+    """查询某 chat_id 最新一条记录，返回 fields 或 {}"""
+    token = get_tenant_token()
+    r = requests.post(
+        f"https://open.feishu.cn/open-apis/bitable/v1/apps/{BITABLE_APP_TOKEN}/tables/{table_id}/records/search",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={
+            "filter": {
+                "conjunction": "and",
+                "conditions": [{"field_name": "会话ID", "operator": "is", "value": [chat_id]}]
+            },
+            "sort": [{"field_name": "创建时间", "order": "DESC"}],
+            "page_size": 1,
+        }
+    )
+    items = r.json().get("data", {}).get("items", [])
+    return items[0].get("fields", {}) if items else {}
+
 def get_wiki_space_id():
     """获取 space_id：优先用环境变量，否则调 list spaces 接口自动探测（进程内缓存）"""
     global _wiki_space_id
@@ -807,8 +825,24 @@ def do_generate_script(chat_id, develop_content, record_id="", table_id=None):
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
+def load_goals_if_needed(chat_id):
+    """内存里没有目标时，自动从 Bitable 读取最新一条"""
+    if goals_memory.get(chat_id):
+        return
+    if not (USE_BITABLE and BITABLE_GOALS_TABLE):
+        return
+    try:
+        fields = bitable_search_latest(BITABLE_GOALS_TABLE, chat_id)
+        content = fields.get("目标内容", "")
+        if content:
+            goals_memory[chat_id] = content
+            print(f"[goals] auto-loaded from bitable for {chat_id}", flush=True)
+    except Exception as e:
+        print(f"[goals] auto-load failed: {e}", flush=True)
+
 def do_morning_plan(chat_id, tasks_text):
     try:
+        load_goals_if_needed(chat_id)
         goals = goals_memory.get(chat_id, "")
         goals_section = f"当前目标：\n{goals}" if goals else "（目标未设置）"
         prompt = f"{goals_section}\n\n今日任务：\n{tasks_text}"
@@ -834,6 +868,7 @@ def do_morning_plan(chat_id, tasks_text):
 
 def do_add_task(chat_id, new_task):
     try:
+        load_goals_if_needed(chat_id)
         cache = task_day_cache.get(chat_id, {})
         today = time.strftime("%Y-%m-%d")
         if cache.get("date") == today and cache.get("raw_tasks"):
