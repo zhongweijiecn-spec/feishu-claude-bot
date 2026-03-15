@@ -46,12 +46,16 @@ SKILL_VIDEO_REWRITE    = load_skill("video-rewrite")
 SKILL_BRAINSTORM_FARM  = load_skill("brainstorm-topics")
 SKILL_BRAINSTORM_DEAL  = load_skill("brainstorm-dealers")
 SKILL_DEVELOP          = load_skill("develop-topic")
+SKILL_TASK_PRIORITIZE  = load_skill("task-prioritize")
+SKILL_TASK_GOALS       = load_skill("task-goals")
 
 # ── 飞书多维表格配置 ─────────────────────────────────────────
 BITABLE_APP_TOKEN     = os.environ.get("BITABLE_APP_TOKEN", "")
 BITABLE_TOPIC_TABLE   = os.environ.get("BITABLE_TOPIC_TABLE_ID", "")   # 头脑风暴
 BITABLE_DEVELOP_TABLE = os.environ.get("BITABLE_DEVELOP_TABLE_ID", "") # 完善选题
 BITABLE_REWRITE_TABLE = os.environ.get("BITABLE_REWRITE_TABLE_ID", "") # 改文案
+BITABLE_TASKS_TABLE   = os.environ.get("BITABLE_TASKS_TABLE_ID", "")   # 任务计划
+BITABLE_GOALS_TABLE   = os.environ.get("BITABLE_GOALS_TABLE_ID", "")   # 目标
 USE_BITABLE = bool(BITABLE_APP_TOKEN)
 
 # ── 飞书知识库配置 ─────────────────────────────────────────────
@@ -84,6 +88,10 @@ def cache_get(key):
 
 def make_cache_key(chat_id):
     return f"{chat_id}_{int(time.time())}"
+
+# ── 任务系统内存存储 ──────────────────────────────────────────
+goals_memory   = {}  # {chat_id: "月度目标+本周重点的结构化文本"}
+task_day_cache = {}  # {chat_id: {"date": "YYYY-MM-DD", "plan_text": "...", "raw_tasks": "..."}}
 
 # ── 对话 system prompt ───────────────────────────────────────
 SYSTEM_PROMPT_CHAT = """你是一个 AI 助手，服务对象是 Michael，农资传媒公司联合创始人。
@@ -602,6 +610,62 @@ def card_develop_result(header, content, cache_key, record_id, table_id=""):
         ]
     }
 
+# ── 任务系统卡片 ─────────────────────────────────────────────
+def card_task_menu():
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {"title": {"tag": "plain_text", "content": "任务中心"}, "template": "blue"},
+        "elements": [
+            {"tag": "action", "actions": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": "早间计划"},
+                 "type": "primary", "value": {"action": "task_morning"}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "添加任务"},
+                 "type": "default", "value": {"action": "task_add"}},
+            ]},
+            {"tag": "action", "actions": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": "今日清单"},
+                 "type": "default", "value": {"action": "task_view"}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "设置目标"},
+                 "type": "default", "value": {"action": "task_goals"}},
+            ]},
+        ]
+    }
+
+def card_task_plan(plan_text, has_goals=True):
+    elements = []
+    if not has_goals:
+        elements.append({"tag": "note", "elements": [
+            {"tag": "plain_text", "content": "尚未设置目标，分析基于任务本身价值。发「任务」→「设置目标」可让判断更准确。"}
+        ]})
+    elements.append({"tag": "div", "text": {"tag": "lark_md", "content": plan_text}})
+    elements.append({"tag": "hr"})
+    elements.append({"tag": "action", "actions": [
+        {"tag": "button", "text": {"tag": "plain_text", "content": "添加任务"},
+         "type": "default", "value": {"action": "task_add"}},
+    ]})
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {"title": {"tag": "plain_text", "content": "今日执行计划"}, "template": "blue"},
+        "elements": elements,
+    }
+
+def card_task_view(chat_id):
+    today = time.strftime("%Y-%m-%d")
+    cache = task_day_cache.get(chat_id, {})
+    if cache.get("date") != today or not cache.get("plan_text"):
+        return {
+            "config": {"wide_screen_mode": True},
+            "header": {"title": {"tag": "plain_text", "content": "今日清单"}, "template": "grey"},
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": "今天还没有执行计划。"}},
+                {"tag": "action", "actions": [
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "开始早间计划"},
+                     "type": "primary", "value": {"action": "task_morning"}},
+                ]},
+            ]
+        }
+    return card_task_plan(cache["plan_text"], bool(goals_memory.get(chat_id)))
+
 # ── 后台任务 ─────────────────────────────────────────────────
 def do_chat_reply(chat_id, text):
     try:
@@ -743,6 +807,76 @@ def do_generate_script(chat_id, develop_content, record_id="", table_id=None):
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
+def do_morning_plan(chat_id, tasks_text):
+    try:
+        goals = goals_memory.get(chat_id, "")
+        goals_section = f"当前目标：\n{goals}" if goals else "（目标未设置）"
+        prompt = f"{goals_section}\n\n今日任务：\n{tasks_text}"
+        result = ai_call(SKILL_TASK_PRIORITIZE, prompt)
+
+        today = time.strftime("%Y-%m-%d")
+        task_day_cache[chat_id] = {"date": today, "plan_text": result, "raw_tasks": tasks_text}
+
+        if USE_BITABLE and BITABLE_TASKS_TABLE:
+            try:
+                bitable_create(BITABLE_TASKS_TABLE, {
+                    "任务原始输入": tasks_text,
+                    "AI分析结果": result,
+                    "日期": today,
+                    "会话ID": chat_id,
+                })
+            except Exception as e:
+                print(f"[bitable] tasks save failed: {e}", flush=True)
+
+        send_card(chat_id, card_task_plan(result, bool(goals)))
+    except Exception as e:
+        send_card(chat_id, card_result("出错了", str(e)))
+
+def do_add_task(chat_id, new_task):
+    try:
+        cache = task_day_cache.get(chat_id, {})
+        today = time.strftime("%Y-%m-%d")
+        if cache.get("date") == today and cache.get("raw_tasks"):
+            raw_tasks = cache["raw_tasks"] + "\n" + new_task
+        else:
+            raw_tasks = new_task
+
+        goals = goals_memory.get(chat_id, "")
+        goals_section = f"当前目标：\n{goals}" if goals else "（目标未设置）"
+        prompt = f"{goals_section}\n\n今日任务（含新增）：\n{raw_tasks}"
+        result = ai_call(SKILL_TASK_PRIORITIZE, prompt)
+
+        task_day_cache[chat_id] = {"date": today, "plan_text": result, "raw_tasks": raw_tasks}
+        send_card(chat_id, card_task_plan(result, bool(goals)))
+    except Exception as e:
+        send_card(chat_id, card_result("出错了", str(e)))
+
+def do_set_goals(chat_id, text):
+    try:
+        result = ai_call(SKILL_TASK_GOALS, text)
+        # --- 之前是展示内容，之后是字段（用于 Bitable）
+        parts = result.rsplit('---', 1)
+        display_text = parts[0].strip()
+        goals_memory[chat_id] = display_text
+
+        if USE_BITABLE and BITABLE_GOALS_TABLE:
+            try:
+                extra = {}
+                if len(parts) > 1:
+                    for line in parts[1].strip().split('\n'):
+                        m = re.match(r'(.+)[：:]\s*(.+)', line.strip())
+                        if m:
+                            extra[m.group(1).strip()] = m.group(2).strip()
+                fields = {"目标内容": display_text, "激活状态": "激活", "会话ID": chat_id}
+                fields.update(extra)
+                bitable_create(BITABLE_GOALS_TABLE, fields)
+            except Exception as e:
+                print(f"[bitable] goals save failed: {e}", flush=True)
+
+        send_card(chat_id, card_result("目标已设置", display_text))
+    except Exception as e:
+        send_card(chat_id, card_result("出错了", str(e)))
+
 # ── 去重 ─────────────────────────────────────────────────────
 processed_events = set()
 
@@ -797,11 +931,22 @@ def webhook():
                 target=do_develop_send,
                 args=(chat_id, audience, text)
             ).start()
+        elif flow == "task_morning":
+            send_card(chat_id, card_loading("正在分析任务优先级..."))
+            threading.Thread(target=do_morning_plan, args=(chat_id, text)).start()
+        elif flow == "task_add":
+            send_card(chat_id, card_loading("正在更新任务清单..."))
+            threading.Thread(target=do_add_task, args=(chat_id, text)).start()
+        elif flow == "task_goals":
+            send_card(chat_id, card_loading("正在整理目标..."))
+            threading.Thread(target=do_set_goals, args=(chat_id, text)).start()
 
         return jsonify({"code": 0})
 
     if text == "文案":
         send_card(chat_id, card_main_menu())
+    elif text == "任务":
+        send_card(chat_id, card_task_menu())
     else:
         threading.Thread(target=do_chat_reply, args=(chat_id, text)).start()
     return jsonify({"code": 0})
@@ -879,6 +1024,30 @@ def handle_card_action(action, chat_id, msg_id):
             target=do_generate_script,
             args=(chat_id, content, record_id, table_id)
         ).start()
+
+    elif act == "task_morning":
+        pending_states[chat_id] = {"flow": "task_morning", "expires": time.time() + STATE_TTL}
+        update_card(msg_id, card_template_prompt(
+            "早间计划",
+            "把今天要做的事一次发过来，一行一条，不用排序，想到什么写什么。"
+        ))
+
+    elif act == "task_add":
+        pending_states[chat_id] = {"flow": "task_add", "expires": time.time() + STATE_TTL}
+        update_card(msg_id, card_template_prompt(
+            "添加任务",
+            "（发送要添加的任务）"
+        ))
+
+    elif act == "task_view":
+        update_card(msg_id, card_task_view(chat_id))
+
+    elif act == "task_goals":
+        pending_states[chat_id] = {"flow": "task_goals", "expires": time.time() + STATE_TTL}
+        update_card(msg_id, card_template_prompt(
+            "设置目标",
+            "把你的目标用自己的话说出来，月度目标、本周重点都行，AI 帮你整理成结构化格式。"
+        ))
 
 
 @app.route("/card", methods=["POST"])
