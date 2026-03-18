@@ -684,57 +684,6 @@ def card_task_view(chat_id):
         }
     return card_task_plan(cache["plan_text"], bool(goals_memory.get(chat_id)))
 
-# ── 抖音音频转文字 ────────────────────────────────────────────
-def clean_url(text):
-    match = re.search(r"https://[^\s]+douyin[^\s]+", text)
-    if not match:
-        return None
-    url = match.group(0).split("?")[0]
-    try:
-        resp = requests.head(url, allow_redirects=True, timeout=10)
-        return resp.url
-    except:
-        return url
-
-def get_audio_url(url):
-    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"}
-    try:
-        resp = requests.get(url, headers=headers, timeout=15)
-        find = re.search(r'"playAddr":"(.*?)"', resp.text)
-        if find:
-            return find.group(1).replace("\\u002F", "/")
-        return None
-    except:
-        return None
-
-def audio2text(audio_url):
-    try:
-        r = requests.post(
-            "https://api.audio-to-text.org/api/transcribe",
-            json={"url": audio_url, "lang": "zh"},
-            timeout=50
-        )
-        return r.json().get("text", "❌ 识别失败")
-    except:
-        return "❌ 无法识别音频"
-
-def douyin2text(raw_link):
-    url = clean_url(raw_link)
-    if not url:
-        return "❌ 未识别抖音链接"
-    audio = get_audio_url(url)
-    if not audio:
-        return "❌ 视频无法播放"
-    text = audio2text(audio)
-    return f"✅ 提取完成（声音转文字）\n\n{text}"
-
-def do_douyin_extract(chat_id, text):
-    try:
-        result = douyin2text(text)
-        send_text(chat_id, result)
-    except Exception as e:
-        send_text(chat_id, f"❌ 出错了：{str(e)}")
-
 # ── 后台任务 ─────────────────────────────────────────────────
 def do_chat_reply(chat_id, text):
     try:
@@ -1033,9 +982,6 @@ def webhook():
         send_card(chat_id, card_main_menu())
     elif text == "任务":
         send_card(chat_id, card_task_menu())
-    elif re.search(r'https://[^\s]*douyin[^\s]*', text):
-        send_text(chat_id, "⏳ 正在提取视频字幕，请稍候...")
-        threading.Thread(target=do_douyin_extract, args=(chat_id, text)).start()
     else:
         threading.Thread(target=do_chat_reply, args=(chat_id, text)).start()
     return jsonify({"code": 0})
