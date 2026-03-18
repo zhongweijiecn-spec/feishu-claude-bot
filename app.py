@@ -684,6 +684,51 @@ def card_task_view(chat_id):
         }
     return card_task_plan(cache["plan_text"], bool(goals_memory.get(chat_id)))
 
+# ── 抖音字幕提取 ─────────────────────────────────────────────
+def clean_douyin_link(text):
+    match = re.search(r'https://[^\s]+douyin[^\s]+', text)
+    if not match:
+        return None
+    raw_url = match.group(0).split('?')[0]
+    try:
+        resp = requests.head(
+            raw_url,
+            allow_redirects=True,
+            timeout=10,
+            headers={"User-Agent": "Mozilla/5.0"}
+        )
+        return resp.url
+    except:
+        return raw_url
+
+def get_douyin_subtitle_text(url):
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        html = resp.text
+        subtitle_match = re.search(r'"subtitle":"(.*?)"', html)
+        if not subtitle_match:
+            return "⚠️ 无自动字幕，该视频可能未开启字幕"
+        subtitle = subtitle_match.group(1)
+        clean_text = re.sub(r'<[^>]+>', '', subtitle)
+        clean_text = clean_text.replace(r"\n", "").replace(r"\u0026amp;", "&")
+        return clean_text
+    except Exception as e:
+        return f"❌ 无法提取：{str(e)}"
+
+def do_douyin_extract(chat_id, text):
+    try:
+        clean_url = clean_douyin_link(text)
+        if not clean_url:
+            send_text(chat_id, "❌ 未检测到有效的抖音链接")
+            return
+        subtitle = get_douyin_subtitle_text(clean_url)
+        send_text(chat_id, f"✅ 提取完成\n\n{subtitle}")
+    except Exception as e:
+        send_text(chat_id, f"❌ 出错了：{str(e)}")
+
 # ── 后台任务 ─────────────────────────────────────────────────
 def do_chat_reply(chat_id, text):
     try:
@@ -982,6 +1027,9 @@ def webhook():
         send_card(chat_id, card_main_menu())
     elif text == "任务":
         send_card(chat_id, card_task_menu())
+    elif re.search(r'https://[^\s]*douyin[^\s]*', text):
+        send_text(chat_id, "⏳ 正在提取视频字幕，请稍候...")
+        threading.Thread(target=do_douyin_extract, args=(chat_id, text)).start()
     else:
         threading.Thread(target=do_chat_reply, args=(chat_id, text)).start()
     return jsonify({"code": 0})
