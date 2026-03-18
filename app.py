@@ -684,48 +684,54 @@ def card_task_view(chat_id):
         }
     return card_task_plan(cache["plan_text"], bool(goals_memory.get(chat_id)))
 
-# ── 抖音字幕提取 ─────────────────────────────────────────────
-def clean_douyin_link(text):
-    match = re.search(r'https://[^\s]+douyin[^\s]+', text)
+# ── 抖音音频转文字 ────────────────────────────────────────────
+def clean_url(text):
+    match = re.search(r"https://[^\s]+douyin[^\s]+", text)
     if not match:
         return None
-    raw_url = match.group(0).split('?')[0]
+    url = match.group(0).split("?")[0]
     try:
-        resp = requests.head(
-            raw_url,
-            allow_redirects=True,
-            timeout=10,
-            headers={"User-Agent": "Mozilla/5.0"}
-        )
+        resp = requests.head(url, allow_redirects=True, timeout=10)
         return resp.url
     except:
-        return raw_url
+        return url
 
-def get_douyin_subtitle_text(url):
+def get_audio_url(url):
+    headers = {"User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"}
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X)"
-        }
         resp = requests.get(url, headers=headers, timeout=15)
-        html = resp.text
-        subtitle_match = re.search(r'"subtitle":"(.*?)"', html)
-        if not subtitle_match:
-            return "⚠️ 无自动字幕，该视频可能未开启字幕"
-        subtitle = subtitle_match.group(1)
-        clean_text = re.sub(r'<[^>]+>', '', subtitle)
-        clean_text = clean_text.replace(r"\n", "").replace(r"\u0026amp;", "&")
-        return clean_text
-    except Exception as e:
-        return f"❌ 无法提取：{str(e)}"
+        find = re.search(r'"playAddr":"(.*?)"', resp.text)
+        if find:
+            return find.group(1).replace("\\u002F", "/")
+        return None
+    except:
+        return None
+
+def audio2text(audio_url):
+    try:
+        r = requests.post(
+            "https://api.audio-to-text.org/api/transcribe",
+            json={"url": audio_url, "lang": "zh"},
+            timeout=50
+        )
+        return r.json().get("text", "❌ 识别失败")
+    except:
+        return "❌ 无法识别音频"
+
+def douyin2text(raw_link):
+    url = clean_url(raw_link)
+    if not url:
+        return "❌ 未识别抖音链接"
+    audio = get_audio_url(url)
+    if not audio:
+        return "❌ 视频无法播放"
+    text = audio2text(audio)
+    return f"✅ 提取完成（声音转文字）\n\n{text}"
 
 def do_douyin_extract(chat_id, text):
     try:
-        clean_url = clean_douyin_link(text)
-        if not clean_url:
-            send_text(chat_id, "❌ 未检测到有效的抖音链接")
-            return
-        subtitle = get_douyin_subtitle_text(clean_url)
-        send_text(chat_id, f"✅ 提取完成\n\n{subtitle}")
+        result = douyin2text(text)
+        send_text(chat_id, result)
     except Exception as e:
         send_text(chat_id, f"❌ 出错了：{str(e)}")
 
