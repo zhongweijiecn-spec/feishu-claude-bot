@@ -41,13 +41,15 @@ def load_skill(name):
     with open(path, encoding="utf-8") as f:
         return f.read()
 
-SKILL_HUMANIZER        = load_skill("humanizer-zh")
-SKILL_VIDEO_REWRITE    = load_skill("video-rewrite")
-SKILL_BRAINSTORM_FARM  = load_skill("brainstorm-topics")
-SKILL_BRAINSTORM_DEAL  = load_skill("brainstorm-dealers")
-SKILL_DEVELOP          = load_skill("develop-topic")
-SKILL_TASK_PRIORITIZE  = load_skill("task-prioritize")
-SKILL_TASK_GOALS       = load_skill("task-goals")
+SKILL_HUMANIZER           = load_skill("humanizer-zh")
+SKILL_VIDEO_REWRITE_FARM  = load_skill("video-rewrite-farmer")
+SKILL_VIDEO_REWRITE_DEAL  = load_skill("video-rewrite-dealer")
+SKILL_BRAINSTORM_FARM     = load_skill("brainstorm-topics")
+SKILL_BRAINSTORM_DEAL     = load_skill("brainstorm-dealers")
+SKILL_DEVELOP_FARM        = load_skill("develop-topic-farmer")
+SKILL_DEVELOP_DEAL        = load_skill("develop-topic-dealer")
+SKILL_TASK_PRIORITIZE     = load_skill("task-prioritize")
+SKILL_TASK_GOALS          = load_skill("task-goals")
 
 # ── 飞书多维表格配置 ─────────────────────────────────────────
 BITABLE_APP_TOKEN     = os.environ.get("BITABLE_APP_TOKEN", "")
@@ -518,7 +520,7 @@ def card_main_menu():
     }
 
 def card_audience_select(flow):
-    titles = {"brainstorm": "头脑风暴 · 选择目标受众", "develop": "完善选题 · 选择目标受众"}
+    titles = {"brainstorm": "头脑风暴 · 选择目标受众", "develop": "完善选题 · 选择目标受众", "rewrite": "改文案 · 选择目标受众"}
     return {
         "config": {"wide_screen_mode": True},
         "elements": [
@@ -607,7 +609,7 @@ def card_brainstorm_result(header, full_text, topics, cache_key, audience, recor
     elements.append({"tag": "action", "actions": buttons})
     return {"config": {"wide_screen_mode": True}, "elements": elements}
 
-def card_develop_result(header, content, cache_key, record_id, table_id=""):
+def card_develop_result(header, content, cache_key, record_id, table_id="", audience="farmer"):
     """完善选题结果，带生成脚本按钮"""
     return {
         "config": {"wide_screen_mode": True},
@@ -623,7 +625,8 @@ def card_develop_result(header, content, cache_key, record_id, table_id=""):
                  "value": {"action": "generate_script",
                            "cache_key": cache_key,
                            "record_id": record_id,
-                           "table_id": table_id}}
+                           "table_id": table_id,
+                           "audience": audience}}
             ]}
         ]
     }
@@ -692,9 +695,10 @@ def do_chat_reply(chat_id, text):
     except Exception as e:
         send_text(chat_id, f"出错了：{e}")
 
-def do_rewrite_send(chat_id, text):
+def do_rewrite_send(chat_id, text, audience="farmer"):
     try:
-        draft = ai_call(SKILL_VIDEO_REWRITE, text)
+        skill = SKILL_VIDEO_REWRITE_FARM if audience == "farmer" else SKILL_VIDEO_REWRITE_DEAL
+        draft = ai_call(skill, text)
         humanizer_input = (
             "注意：这是短视频脚本，第一句是刻意设计的钩子，"
             "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。\n\n"
@@ -764,8 +768,8 @@ def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=
         if table_id is None:
             table_id = BITABLE_DEVELOP_TABLE
         label  = "种植户" if audience == "farmer" else "经销商"
-        prompt = f"受众：面向{label}\n\n{user_input}"
-        result = ai_call(SKILL_DEVELOP, prompt)
+        skill  = SKILL_DEVELOP_FARM if audience == "farmer" else SKILL_DEVELOP_DEAL
+        result = ai_call(skill, user_input)
         header = f"完善选题（面向{label}）"
 
         cache_key = make_cache_key(chat_id)
@@ -786,13 +790,14 @@ def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=
             except Exception as e:
                 print(f"[bitable] develop failed: {e}", flush=True)
 
-        send_card(chat_id, card_develop_result(header, result, cache_key, record_id, table_id))
+        send_card(chat_id, card_develop_result(header, result, cache_key, record_id, table_id, audience))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_generate_script(chat_id, develop_content, record_id="", table_id=None):
+def do_generate_script(chat_id, develop_content, record_id="", table_id=None, audience="farmer"):
     try:
-        draft = ai_call(SKILL_VIDEO_REWRITE, develop_content)
+        skill = SKILL_VIDEO_REWRITE_FARM if audience == "farmer" else SKILL_VIDEO_REWRITE_DEAL
+        draft = ai_call(skill, develop_content)
         humanizer_input = (
             "注意：这是短视频脚本，第一句是刻意设计的钩子，"
             "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。\n\n"
@@ -953,7 +958,7 @@ def webhook():
 
         if flow == "rewrite":
             send_card(chat_id, card_loading("正在改文案..."))
-            threading.Thread(target=do_rewrite_send, args=(chat_id, text)).start()
+            threading.Thread(target=do_rewrite_send, args=(chat_id, text, audience or "farmer")).start()
         elif flow == "brainstorm":
             send_card(chat_id, card_loading(f"正在生成「{content_type}」选题..."))
             threading.Thread(
@@ -991,8 +996,7 @@ def handle_card_action(action, chat_id, msg_id):
     act = action.get("action")
 
     if act == "rewrite":
-        pending_states[chat_id] = {"flow": "rewrite", "expires": time.time() + STATE_TTL}
-        update_card(msg_id, card_template_prompt("改文案", "（直接把要改的文案发过来）"))
+        update_card(msg_id, card_audience_select("rewrite"))
 
     elif act == "brainstorm":
         update_card(msg_id, card_audience_select("brainstorm"))
@@ -1013,6 +1017,15 @@ def handle_card_action(action, chat_id, msg_id):
             "expires": time.time() + STATE_TTL
         }
         update_card(msg_id, card_template_prompt(f"完善选题 · 面向{label}", template))
+
+    elif act == "rewrite_audience":
+        audience = action.get("audience")
+        label    = "种植户" if audience == "farmer" else "经销商"
+        pending_states[chat_id] = {
+            "flow": "rewrite", "audience": audience,
+            "expires": time.time() + STATE_TTL
+        }
+        update_card(msg_id, card_template_prompt(f"改文案 · 面向{label}", "（直接把要改的文案发过来）"))
 
     elif act == "brainstorm_type":
         audience     = action.get("audience")
@@ -1048,6 +1061,7 @@ def handle_card_action(action, chat_id, msg_id):
         record_id = action.get("record_id", "")
         cache_key = action.get("cache_key", "")
         table_id  = action.get("table_id", BITABLE_DEVELOP_TABLE)
+        audience  = action.get("audience", "farmer")
 
         content = get_develop_content(record_id, cache_key, table_id)
         if not content:
@@ -1057,7 +1071,7 @@ def handle_card_action(action, chat_id, msg_id):
         update_card(msg_id, card_loading("正在生成脚本..."))
         threading.Thread(
             target=do_generate_script,
-            args=(chat_id, content, record_id, table_id)
+            args=(chat_id, content, record_id, table_id, audience)
         ).start()
 
     elif act == "task_morning":
