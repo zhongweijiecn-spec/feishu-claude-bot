@@ -579,6 +579,10 @@ def card_template_prompt(title, template):
         "elements": [
             {"tag": "div", "text": {"tag": "lark_md",
              "content": f"**{title}**\n\n请按以下格式回复：\n\n```\n{template}\n```"}},
+            {"tag": "action", "actions": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": "取消"},
+                 "type": "danger", "value": {"action": "cancel"}},
+            ]}
         ]
     }
 
@@ -995,7 +999,11 @@ def webhook():
 def handle_card_action(action, chat_id, msg_id):
     act = action.get("action")
 
-    if act == "rewrite":
+    if act == "cancel":
+        pending_states.pop(chat_id, None)
+        update_card(msg_id, card_main_menu())
+
+    elif act == "rewrite":
         update_card(msg_id, card_audience_select("rewrite"))
 
     elif act == "brainstorm":
