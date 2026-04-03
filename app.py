@@ -417,6 +417,13 @@ def _image_block(file_token):
     }
 
 
+def split_extra_output(text):
+    """Split text at --- separator, returns (main_text, extra_text)."""
+    idx = text.find('\n---')
+    if idx == -1:
+        return text, ""
+    return text[:idx].strip(), text[idx:]
+
 def parse_extra_output(text):
     """从 AI 输出的 --- 分隔线后，解析内部标题和标签字段"""
     result = {}
@@ -674,12 +681,13 @@ def do_rewrite_send(chat_id, text, audience="farmer"):
     try:
         skill = SKILL_VIDEO_REWRITE_FARM if audience == "farmer" else SKILL_VIDEO_REWRITE_DEAL
         draft = ai_call(skill, text)
+        draft_main, draft_extra = split_extra_output(draft)
         humanizer_input = (
             "注意：这是短视频脚本，第一句是刻意设计的钩子，"
             "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。\n\n"
-            + draft
+            + draft_main
         )
-        result = ai_call(SKILL_HUMANIZER, humanizer_input)
+        result = ai_call(SKILL_HUMANIZER, humanizer_input) + draft_extra
 
         if USE_BITABLE and BITABLE_REWRITE_TABLE:
             try:
@@ -783,10 +791,11 @@ def do_generate_script(chat_id, develop_content, record_id="", table_id=None, au
     try:
         skill = SKILL_GENERATE_SCRIPT_FARM if audience == "farmer" else SKILL_GENERATE_SCRIPT_DEAL
 
-        content_for_script = develop_content
+        develop_main, _ = split_extra_output(develop_content)
+        content_for_script = develop_main
         if audience == "farmer" and any([crop, scale, identity, intent]):
             context = f"作物：{crop}\n规模：{scale}\n发布者身份：{identity}\n内容意图：{intent}\n\n"
-            content_for_script = context + develop_content
+            content_for_script = context + develop_main
 
         draft = ai_call(skill, content_for_script)
         humanizer_input = (
