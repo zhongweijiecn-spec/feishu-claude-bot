@@ -46,10 +46,8 @@ SKILL_VIDEO_REWRITE_FARM     = load_skill("video-rewrite-farmer")
 SKILL_VIDEO_REWRITE_DEAL     = load_skill("video-rewrite-dealer")
 SKILL_BRAINSTORM_FARM        = load_skill("brainstorm-topics")
 SKILL_BRAINSTORM_DEAL        = load_skill("brainstorm-dealers")
-SKILL_DEVELOP_FARM           = load_skill("develop-topic-farmer")
-SKILL_DEVELOP_DEAL           = load_skill("develop-topic-dealer")
-SKILL_GENERATE_SCRIPT_FARM   = load_skill("generate-script-farmer")
-SKILL_GENERATE_SCRIPT_DEAL   = load_skill("generate-script-dealer")
+SKILL_SCRIPT_FARM            = load_skill("script-farmer")
+SKILL_SCRIPT_DEAL            = load_skill("script-dealer")
 
 # ── 飞书多维表格配置 ─────────────────────────────────────────
 BITABLE_APP_TOKEN     = os.environ.get("BITABLE_APP_TOKEN", "")
@@ -473,14 +471,6 @@ def get_topic_content(record_id, cache_key, topic_idx):
         return topics[topic_idx][1]
     return None
 
-def get_develop_content(record_id, cache_key, table_id=None):
-    """优先从 Bitable 读，降级到内存缓存"""
-    if USE_BITABLE and record_id and table_id:
-        fields = bitable_get(table_id, record_id)
-        content = fields.get("完善内容", "")
-        if content:
-            return content
-    return cache_get(cache_key) if cache_key else None
 
 # ── 卡片模板 ─────────────────────────────────────────────────
 def card_main_menu():
@@ -648,33 +638,6 @@ def card_brainstorm_result(header, full_text, topics, cache_key, audience, recor
     elements.append({"tag": "action", "actions": buttons})
     return {"config": {"wide_screen_mode": True}, "elements": elements}
 
-def card_develop_result(header, content, cache_key, record_id, table_id="", audience="farmer",
-                        crop="", scale="", identity="", intent=""):
-    """完善选题结果，带生成脚本按钮"""
-    btn_value = {
-        "action": "generate_script",
-        "cache_key": cache_key,
-        "record_id": record_id,
-        "table_id": table_id,
-        "audience": audience,
-        "crop": crop,
-        "scale": scale,
-        "identity": identity,
-        "intent": intent,
-    }
-    return {
-        "config": {"wide_screen_mode": True},
-        "elements": [
-            {"tag": "div", "text": {"tag": "lark_md", "content": f"**{header}**"}},
-            {"tag": "hr"},
-            {"tag": "div", "text": {"tag": "lark_md", "content": content}},
-            {"tag": "hr"},
-            {"tag": "action", "actions": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "✏️ 生成脚本"},
-                 "type": "primary", "value": btn_value}
-            ]}
-        ]
-    }
 
 # ── 后台任务 ─────────────────────────────────────────────────
 def do_rewrite_send(chat_id, text, audience="farmer"):
@@ -684,7 +647,8 @@ def do_rewrite_send(chat_id, text, audience="farmer"):
         draft_main, draft_extra = split_extra_output(draft)
         humanizer_input = (
             "注意：这是短视频脚本，第一句是刻意设计的钩子，"
-            "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。\n\n"
+            "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。"
+            "严格控制在400字以内。\n\n"
             + draft_main
         )
         result = ai_call(SKILL_HUMANIZER, humanizer_input) + draft_extra
@@ -746,87 +710,61 @@ def do_brainstorm_send(chat_id, audience, content_type, user_input):
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=None,
-                    crop="", scale="", identity="", intent=""):
+def do_script_send(chat_id, audience, user_input, topic_record_id="", table_id=None,
+                   crop="", scale="", identity="", intent=""):
     try:
         if table_id is None:
             table_id = BITABLE_DEVELOP_TABLE
-        label  = "种植户" if audience == "farmer" else "经销商"
-        skill  = SKILL_DEVELOP_FARM if audience == "farmer" else SKILL_DEVELOP_DEAL
+        label = "种植户" if audience == "farmer" else "经销商"
+        skill = SKILL_SCRIPT_FARM if audience == "farmer" else SKILL_SCRIPT_DEAL
 
+        content_for_script = user_input
         if audience == "farmer" and any([crop, scale, identity, intent]):
             context = f"作物：{crop}\n规模：{scale}\n发布者身份：{identity}\n内容意图：{intent}\n\n"
-            user_input = context + user_input
+            content_for_script = context + user_input
 
-        result = ai_call(skill, user_input)
-        header = f"完善选题（面向{label}）"
-
-        cache_key = make_cache_key(chat_id)
-        cache_set(cache_key, result)
+        draft = ai_call(skill, content_for_script)
+        draft_main, draft_extra = split_extra_output(draft)
+        humanizer_input = (
+            "注意：这是短视频脚本，第一句是刻意设计的钩子，"
+            "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。"
+            "严格控制在400字以内。\n\n"
+            + draft_main
+        )
+        result = ai_call(SKILL_HUMANIZER, humanizer_input) + draft_extra
 
         record_id = topic_record_id
         if USE_BITABLE and table_id:
             try:
                 extra = parse_extra_output(result)
                 if record_id:
-                    fields = {"完善内容": result}
+                    fields = {"最终脚本": result}
                     fields.update(extra)
                     bitable_update(table_id, record_id, fields)
                 else:
-                    fields = {"完善内容": result, "受众": label}
+                    fields = {"最终脚本": result, "受众": label}
                     fields.update(extra)
                     record_id = bitable_create(table_id, fields)
-            except Exception as e:
-                print(f"[bitable] develop failed: {e}", flush=True)
-
-        send_card(chat_id, card_develop_result(
-            header, result, cache_key, record_id, table_id, audience,
-            crop, scale, identity, intent
-        ))
-    except Exception as e:
-        send_card(chat_id, card_result("出错了", str(e)))
-
-def do_generate_script(chat_id, develop_content, record_id="", table_id=None, audience="farmer",
-                       crop="", scale="", identity="", intent=""):
-    try:
-        skill = SKILL_GENERATE_SCRIPT_FARM if audience == "farmer" else SKILL_GENERATE_SCRIPT_DEAL
-
-        develop_main, _ = split_extra_output(develop_content)
-        content_for_script = develop_main
-        if audience == "farmer" and any([crop, scale, identity, intent]):
-            context = f"作物：{crop}\n规模：{scale}\n发布者身份：{identity}\n内容意图：{intent}\n\n"
-            content_for_script = context + develop_main
-
-        draft = ai_call(skill, content_for_script)
-        humanizer_input = (
-            "注意：这是短视频脚本，第一句是刻意设计的钩子，"
-            "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。\n\n"
-            + draft
-        )
-        result = ai_call(SKILL_HUMANIZER, humanizer_input)
-
-        if USE_BITABLE and record_id and table_id:
-            try:
-                bitable_update(table_id, record_id, {"最终脚本": result})
             except Exception as e:
                 print(f"[bitable] script save failed: {e}", flush=True)
 
         doc_url = ""
         if USE_WIKI:
             try:
-                extra  = parse_extra_output(develop_content)
-                title  = extract_doc_title(develop_content)
-                blocks = build_doc_blocks(develop_content, result)
+                extra = parse_extra_output(result)
+                title = extract_doc_title(result)
+                blocks = [_heading2_block("【脚本文案】")]
+                for line in result.strip().split('\n'):
+                    if line.strip():
+                        blocks.append(_text_block(line.strip()))
                 doc_url = create_wiki_doc(title, blocks, image_query=_crop_to_query(extra))
             except Exception as e:
                 print(f"[wiki] script doc failed: {e}", flush=True)
 
-        develop_clean = re.sub(r'\n{3,}', '\n\n', develop_content).strip()
-        script_clean  = re.sub(r'\n{3,}', '\n\n', result).strip()
-        deliverable = f"{develop_clean}\n\n---\n**【最终脚本】**\n{script_clean}"
+        content = result
         if doc_url:
-            deliverable += f"\n\n[📄 查看完整文档]({doc_url})"
-        send_card(chat_id, card_result("完整交付物", deliverable))
+            content += f"\n\n[📄 查看完整文档]({doc_url})"
+        send_card(chat_id, card_result(f"脚本（面向{label}）", content))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
@@ -883,9 +821,9 @@ def webhook():
             scale    = state.get("scale", "")
             identity = state.get("identity", "")
             intent   = state.get("intent", "")
-            send_card(chat_id, card_loading("正在完善选题..."))
+            send_card(chat_id, card_loading("正在生成脚本..."))
             threading.Thread(
-                target=do_develop_send,
+                target=do_script_send,
                 args=(chat_id, audience, text, "", None, crop, scale, identity, intent)
             ).start()
 
@@ -988,32 +926,11 @@ def handle_card_action(action, chat_id, msg_id):
             update_card(msg_id, card_result("已过期", "请重新发起头脑风暴"))
             return
 
-        update_card(msg_id, card_loading("正在完善选题..."))
-        # 头脑风暴链路：完善和脚本都写入头脑风暴表
-        threading.Thread(
-            target=do_develop_send,
-            args=(chat_id, audience, content, record_id, BITABLE_TOPIC_TABLE)
-        ).start()
-
-    elif act == "generate_script":
-        record_id = action.get("record_id", "")
-        cache_key = action.get("cache_key", "")
-        table_id  = action.get("table_id", BITABLE_DEVELOP_TABLE)
-        audience  = action.get("audience", "farmer")
-        crop      = action.get("crop", "")
-        scale     = action.get("scale", "")
-        identity  = action.get("identity", "")
-        intent    = action.get("intent", "")
-
-        content = get_develop_content(record_id, cache_key, table_id)
-        if not content:
-            update_card(msg_id, card_result("已过期", "请重新完善选题"))
-            return
-
         update_card(msg_id, card_loading("正在生成脚本..."))
+        # 头脑风暴链路：脚本写入头脑风暴表
         threading.Thread(
-            target=do_generate_script,
-            args=(chat_id, content, record_id, table_id, audience, crop, scale, identity, intent)
+            target=do_script_send,
+            args=(chat_id, audience, content, record_id, BITABLE_TOPIC_TABLE)
         ).start()
 
 
