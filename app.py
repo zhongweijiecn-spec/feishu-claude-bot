@@ -41,23 +41,21 @@ def load_skill(name):
     with open(path, encoding="utf-8") as f:
         return f.read()
 
-SKILL_HUMANIZER           = load_skill("humanizer-zh")
-SKILL_VIDEO_REWRITE_FARM  = load_skill("video-rewrite-farmer")
-SKILL_VIDEO_REWRITE_DEAL  = load_skill("video-rewrite-dealer")
-SKILL_BRAINSTORM_FARM     = load_skill("brainstorm-topics")
-SKILL_BRAINSTORM_DEAL     = load_skill("brainstorm-dealers")
-SKILL_DEVELOP_FARM        = load_skill("develop-topic-farmer")
-SKILL_DEVELOP_DEAL        = load_skill("develop-topic-dealer")
-SKILL_TASK_PRIORITIZE     = load_skill("task-prioritize")
-SKILL_TASK_GOALS          = load_skill("task-goals")
+SKILL_HUMANIZER              = load_skill("humanizer-zh")
+SKILL_VIDEO_REWRITE_FARM     = load_skill("video-rewrite-farmer")
+SKILL_VIDEO_REWRITE_DEAL     = load_skill("video-rewrite-dealer")
+SKILL_BRAINSTORM_FARM        = load_skill("brainstorm-topics")
+SKILL_BRAINSTORM_DEAL        = load_skill("brainstorm-dealers")
+SKILL_DEVELOP_FARM           = load_skill("develop-topic-farmer")
+SKILL_DEVELOP_DEAL           = load_skill("develop-topic-dealer")
+SKILL_GENERATE_SCRIPT_FARM   = load_skill("generate-script-farmer")
+SKILL_GENERATE_SCRIPT_DEAL   = load_skill("generate-script-dealer")
 
 # ── 飞书多维表格配置 ─────────────────────────────────────────
 BITABLE_APP_TOKEN     = os.environ.get("BITABLE_APP_TOKEN", "")
 BITABLE_TOPIC_TABLE   = os.environ.get("BITABLE_TOPIC_TABLE_ID", "")   # 头脑风暴
 BITABLE_DEVELOP_TABLE = os.environ.get("BITABLE_DEVELOP_TABLE_ID", "") # 完善选题
 BITABLE_REWRITE_TABLE = os.environ.get("BITABLE_REWRITE_TABLE_ID", "") # 改文案
-BITABLE_TASKS_TABLE   = os.environ.get("BITABLE_TASKS_TABLE_ID", "")   # 任务计划
-BITABLE_GOALS_TABLE   = os.environ.get("BITABLE_GOALS_TABLE_ID", "")   # 目标
 USE_BITABLE = bool(BITABLE_APP_TOKEN)
 
 # ── 飞书知识库配置 ─────────────────────────────────────────────
@@ -91,33 +89,6 @@ def cache_get(key):
 def make_cache_key(chat_id):
     return f"{chat_id}_{int(time.time())}"
 
-# ── 任务系统内存存储 ──────────────────────────────────────────
-goals_memory   = {}  # {chat_id: "月度目标+本周重点的结构化文本"}
-task_day_cache = {}  # {chat_id: {"date": "YYYY-MM-DD", "plan_text": "...", "raw_tasks": "..."}}
-
-# ── 对话 system prompt ───────────────────────────────────────
-SYSTEM_PROMPT_CHAT = """你是一个 AI 助手，服务对象是 Michael，农资传媒公司联合创始人。
-
-**公司背景**
-- 农资传媒公司，农资平台旗下子公司
-- 主营：AI 智能体开发、短视频内容制作（策划/脚本/剪辑/拍摄指导）
-- 团队约 10 人，含编导、剪辑、业务员
-
-**Michael 的角色**
-- 联合创始人 / 合股东，同时兼顾农资平台业务
-- 产品 + 技术 + 运营三位一体
-- 当前重心：对客小程序开发、公司业务流程搭建、AI 文案/剪辑智能体开发、客户增长
-
-**个人信息**
-- 性别：男，出生于 1987 年
-- 身高：176cm，体重：72.5kg
-- 所在城市：江苏溧阳
-- 饮食偏好：喜欢吃辣
-- 健康状况：无特殊
-
-**回复要求**
-- 中文回复，简洁直接，不废话，不用 emoji"""
-
 # ── 输入模板 ─────────────────────────────────────────────────
 TEMPLATES_FARM = {
     "产品推广":  "产品：\n卖点：\n地区：",
@@ -135,8 +106,10 @@ TEMPLATES_DEAL = {
     "行业观点":  "话题：\n地区（可选）：",
 }
 
-TEMPLATE_DEVELOP_FARM = "话题方向：\n已有想法（没有就写「无」）：\n背景信息（产品/场景/地区，可选）："
-TEMPLATE_DEVELOP_DEAL = "话题方向：\n已有想法（没有就写「无」）：\n地区（可选，默认江浙沪皖豫）："
+TEMPLATE_DEVELOP_FARM         = "话题方向：\n已有想法（没有就写「无」）：\n背景信息（产品/场景/地区，可选）："
+TEMPLATE_DEVELOP_FARMER_BRAND = "话题方向：\n已有想法（没有就写「无」）：\n地区（可选）："
+TEMPLATE_DEVELOP_FARMER_PRODUCT = "话题方向：\n产品名称：\n核心卖点（1-3条）：\n产品解决的痛点：\n地区（可选）："
+TEMPLATE_DEVELOP_DEAL         = "话题方向：\n已有想法（没有就写「无」）：\n地区（可选，默认江浙沪皖豫）："
 
 # ── 解析头脑风暴输出 ─────────────────────────────────────────
 def parse_brainstorm(text):
@@ -536,6 +509,61 @@ def card_audience_select(flow):
         ]
     }
 
+def card_farmer_crop_select():
+    def btn(label, crop):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "default", "value": {"action": "develop_farmer_crop", "crop": crop}}
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": "**完善选题 · 选择作物**"}},
+            {"tag": "action", "actions": [btn("🌾 小麦", "小麦"), btn("🌽 玉米", "玉米"), btn("🌾 水稻", "水稻")]},
+            {"tag": "action", "actions": [btn("🥜 花生", "花生"), btn("🫘 棉花", "棉花"), btn("🥦 果蔬", "果蔬")]},
+        ]
+    }
+
+def card_farmer_scale_select(crop):
+    def btn(label, scale):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "default", "value": {"action": "develop_farmer_scale", "crop": crop, "scale": scale}}
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**完善选题 · {crop} · 选择规模**"}},
+            {"tag": "action", "actions": [
+                btn("兼业小户", "兼业小户"), btn("专业种植户", "专业种植户"), btn("规模经营者", "规模经营者")
+            ]},
+        ]
+    }
+
+def card_farmer_identity_select(crop, scale):
+    def btn(label, identity):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "default",
+                "value": {"action": "develop_farmer_identity", "crop": crop, "scale": scale, "identity": identity}}
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**完善选题 · {crop} · {scale} · 发布者身份**"}},
+            {"tag": "action", "actions": [btn("业务员", "业务员"), btn("经销商", "经销商"), btn("技术员", "技术员")]},
+        ]
+    }
+
+def card_farmer_intent_select(crop, scale, identity):
+    def btn(label, intent):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "default",
+                "value": {"action": "develop_farmer_intent",
+                          "crop": crop, "scale": scale, "identity": identity, "intent": intent}}
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md",
+             "content": f"**完善选题 · {crop} · {scale} · {identity} · 内容意图**"}},
+            {"tag": "action", "actions": [btn("立人设 / 建信任", "立人设"), btn("推产品 / 转化", "推产品")]},
+        ]
+    }
+
 def card_content_types(audience):
     if audience == "farmer":
         types = ["产品推广", "解决方案", "观点/吐槽", "案例故事", "知识科普"]
@@ -613,8 +641,20 @@ def card_brainstorm_result(header, full_text, topics, cache_key, audience, recor
     elements.append({"tag": "action", "actions": buttons})
     return {"config": {"wide_screen_mode": True}, "elements": elements}
 
-def card_develop_result(header, content, cache_key, record_id, table_id="", audience="farmer"):
+def card_develop_result(header, content, cache_key, record_id, table_id="", audience="farmer",
+                        crop="", scale="", identity="", intent=""):
     """完善选题结果，带生成脚本按钮"""
+    btn_value = {
+        "action": "generate_script",
+        "cache_key": cache_key,
+        "record_id": record_id,
+        "table_id": table_id,
+        "audience": audience,
+        "crop": crop,
+        "scale": scale,
+        "identity": identity,
+        "intent": intent,
+    }
     return {
         "config": {"wide_screen_mode": True},
         "elements": [
@@ -623,82 +663,13 @@ def card_develop_result(header, content, cache_key, record_id, table_id="", audi
             {"tag": "div", "text": {"tag": "lark_md", "content": content}},
             {"tag": "hr"},
             {"tag": "action", "actions": [
-                {"tag": "button",
-                 "text": {"tag": "plain_text", "content": "✏️ 生成脚本"},
-                 "type": "primary",
-                 "value": {"action": "generate_script",
-                           "cache_key": cache_key,
-                           "record_id": record_id,
-                           "table_id": table_id,
-                           "audience": audience}}
+                {"tag": "button", "text": {"tag": "plain_text", "content": "✏️ 生成脚本"},
+                 "type": "primary", "value": btn_value}
             ]}
         ]
     }
 
-# ── 任务系统卡片 ─────────────────────────────────────────────
-def card_task_menu():
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {"title": {"tag": "plain_text", "content": "任务中心"}, "template": "blue"},
-        "elements": [
-            {"tag": "action", "actions": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "早间计划"},
-                 "type": "primary", "value": {"action": "task_morning"}},
-                {"tag": "button", "text": {"tag": "plain_text", "content": "添加任务"},
-                 "type": "default", "value": {"action": "task_add"}},
-            ]},
-            {"tag": "action", "actions": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "今日清单"},
-                 "type": "default", "value": {"action": "task_view"}},
-                {"tag": "button", "text": {"tag": "plain_text", "content": "设置目标"},
-                 "type": "default", "value": {"action": "task_goals"}},
-            ]},
-        ]
-    }
-
-def card_task_plan(plan_text, has_goals=True):
-    elements = []
-    if not has_goals:
-        elements.append({"tag": "note", "elements": [
-            {"tag": "plain_text", "content": "尚未设置目标，分析基于任务本身价值。发「任务」→「设置目标」可让判断更准确。"}
-        ]})
-    elements.append({"tag": "div", "text": {"tag": "lark_md", "content": plan_text}})
-    elements.append({"tag": "hr"})
-    elements.append({"tag": "action", "actions": [
-        {"tag": "button", "text": {"tag": "plain_text", "content": "添加任务"},
-         "type": "default", "value": {"action": "task_add"}},
-    ]})
-    return {
-        "config": {"wide_screen_mode": True},
-        "header": {"title": {"tag": "plain_text", "content": "今日执行计划"}, "template": "blue"},
-        "elements": elements,
-    }
-
-def card_task_view(chat_id):
-    today = time.strftime("%Y-%m-%d")
-    cache = task_day_cache.get(chat_id, {})
-    if cache.get("date") != today or not cache.get("plan_text"):
-        return {
-            "config": {"wide_screen_mode": True},
-            "header": {"title": {"tag": "plain_text", "content": "今日清单"}, "template": "grey"},
-            "elements": [
-                {"tag": "div", "text": {"tag": "lark_md", "content": "今天还没有执行计划。"}},
-                {"tag": "action", "actions": [
-                    {"tag": "button", "text": {"tag": "plain_text", "content": "开始早间计划"},
-                     "type": "primary", "value": {"action": "task_morning"}},
-                ]},
-            ]
-        }
-    return card_task_plan(cache["plan_text"], bool(goals_memory.get(chat_id)))
-
 # ── 后台任务 ─────────────────────────────────────────────────
-def do_chat_reply(chat_id, text):
-    try:
-        result = ai_call(SYSTEM_PROMPT_CHAT, text)
-        send_text(chat_id, result)
-    except Exception as e:
-        send_text(chat_id, f"出错了：{e}")
-
 def do_rewrite_send(chat_id, text, audience="farmer"):
     try:
         skill = SKILL_VIDEO_REWRITE_FARM if audience == "farmer" else SKILL_VIDEO_REWRITE_DEAL
@@ -767,12 +738,18 @@ def do_brainstorm_send(chat_id, audience, content_type, user_input):
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=None):
+def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=None,
+                    crop="", scale="", identity="", intent=""):
     try:
         if table_id is None:
             table_id = BITABLE_DEVELOP_TABLE
         label  = "种植户" if audience == "farmer" else "经销商"
         skill  = SKILL_DEVELOP_FARM if audience == "farmer" else SKILL_DEVELOP_DEAL
+
+        if audience == "farmer" and any([crop, scale, identity, intent]):
+            context = f"作物：{crop}\n规模：{scale}\n发布者身份：{identity}\n内容意图：{intent}\n\n"
+            user_input = context + user_input
+
         result = ai_call(skill, user_input)
         header = f"完善选题（面向{label}）"
 
@@ -794,14 +771,24 @@ def do_develop_send(chat_id, audience, user_input, topic_record_id="", table_id=
             except Exception as e:
                 print(f"[bitable] develop failed: {e}", flush=True)
 
-        send_card(chat_id, card_develop_result(header, result, cache_key, record_id, table_id, audience))
+        send_card(chat_id, card_develop_result(
+            header, result, cache_key, record_id, table_id, audience,
+            crop, scale, identity, intent
+        ))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
-def do_generate_script(chat_id, develop_content, record_id="", table_id=None, audience="farmer"):
+def do_generate_script(chat_id, develop_content, record_id="", table_id=None, audience="farmer",
+                       crop="", scale="", identity="", intent=""):
     try:
-        skill = SKILL_VIDEO_REWRITE_FARM if audience == "farmer" else SKILL_VIDEO_REWRITE_DEAL
-        draft = ai_call(skill, develop_content)
+        skill = SKILL_GENERATE_SCRIPT_FARM if audience == "farmer" else SKILL_GENERATE_SCRIPT_DEAL
+
+        content_for_script = develop_content
+        if audience == "farmer" and any([crop, scale, identity, intent]):
+            context = f"作物：{crop}\n规模：{scale}\n发布者身份：{identity}\n内容意图：{intent}\n\n"
+            content_for_script = context + develop_content
+
+        draft = ai_call(skill, content_for_script)
         humanizer_input = (
             "注意：这是短视频脚本，第一句是刻意设计的钩子，"
             "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。\n\n"
@@ -831,93 +818,6 @@ def do_generate_script(chat_id, develop_content, record_id="", table_id=None, au
         if doc_url:
             deliverable += f"\n\n[📄 查看完整文档]({doc_url})"
         send_card(chat_id, card_result("完整交付物", deliverable))
-    except Exception as e:
-        send_card(chat_id, card_result("出错了", str(e)))
-
-def load_goals_if_needed(chat_id):
-    """内存里没有目标时，自动从 Bitable 读取最新一条"""
-    if goals_memory.get(chat_id):
-        return
-    if not (USE_BITABLE and BITABLE_GOALS_TABLE):
-        return
-    try:
-        fields = bitable_search_latest(BITABLE_GOALS_TABLE, chat_id)
-        content = fields.get("目标内容", "")
-        if content:
-            goals_memory[chat_id] = content
-            print(f"[goals] auto-loaded from bitable for {chat_id}", flush=True)
-    except Exception as e:
-        print(f"[goals] auto-load failed: {e}", flush=True)
-
-def do_morning_plan(chat_id, tasks_text):
-    try:
-        load_goals_if_needed(chat_id)
-        goals = goals_memory.get(chat_id, "")
-        goals_section = f"当前目标：\n{goals}" if goals else "（目标未设置）"
-        prompt = f"{goals_section}\n\n今日任务：\n{tasks_text}"
-        result = ai_call(SKILL_TASK_PRIORITIZE, prompt)
-
-        today = time.strftime("%Y-%m-%d")
-        task_day_cache[chat_id] = {"date": today, "plan_text": result, "raw_tasks": tasks_text}
-
-        if USE_BITABLE and BITABLE_TASKS_TABLE:
-            try:
-                bitable_create(BITABLE_TASKS_TABLE, {
-                    "任务原始输入": tasks_text,
-                    "AI分析结果": result,
-                    "日期": today,
-                    "会话ID": chat_id,
-                })
-            except Exception as e:
-                print(f"[bitable] tasks save failed: {e}", flush=True)
-
-        send_card(chat_id, card_task_plan(result, bool(goals)))
-    except Exception as e:
-        send_card(chat_id, card_result("出错了", str(e)))
-
-def do_add_task(chat_id, new_task):
-    try:
-        load_goals_if_needed(chat_id)
-        cache = task_day_cache.get(chat_id, {})
-        today = time.strftime("%Y-%m-%d")
-        if cache.get("date") == today and cache.get("raw_tasks"):
-            raw_tasks = cache["raw_tasks"] + "\n" + new_task
-        else:
-            raw_tasks = new_task
-
-        goals = goals_memory.get(chat_id, "")
-        goals_section = f"当前目标：\n{goals}" if goals else "（目标未设置）"
-        prompt = f"{goals_section}\n\n今日任务（含新增）：\n{raw_tasks}"
-        result = ai_call(SKILL_TASK_PRIORITIZE, prompt)
-
-        task_day_cache[chat_id] = {"date": today, "plan_text": result, "raw_tasks": raw_tasks}
-        send_card(chat_id, card_task_plan(result, bool(goals)))
-    except Exception as e:
-        send_card(chat_id, card_result("出错了", str(e)))
-
-def do_set_goals(chat_id, text):
-    try:
-        result = ai_call(SKILL_TASK_GOALS, text)
-        # --- 之前是展示内容，之后是字段（用于 Bitable）
-        parts = result.rsplit('---', 1)
-        display_text = parts[0].strip()
-        goals_memory[chat_id] = display_text
-
-        if USE_BITABLE and BITABLE_GOALS_TABLE:
-            try:
-                extra = {}
-                if len(parts) > 1:
-                    for line in parts[1].strip().split('\n'):
-                        m = re.match(r'(.+)[：:]\s*(.+)', line.strip())
-                        if m:
-                            extra[m.group(1).strip()] = m.group(2).strip()
-                fields = {"目标内容": display_text, "激活状态": "激活", "会话ID": chat_id}
-                fields.update(extra)
-                bitable_create(BITABLE_GOALS_TABLE, fields)
-            except Exception as e:
-                print(f"[bitable] goals save failed: {e}", flush=True)
-
-        send_card(chat_id, card_result("目标已设置", display_text))
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
@@ -970,29 +870,20 @@ def webhook():
                 args=(chat_id, audience, content_type, text)
             ).start()
         elif flow == "develop":
+            crop     = state.get("crop", "")
+            scale    = state.get("scale", "")
+            identity = state.get("identity", "")
+            intent   = state.get("intent", "")
             send_card(chat_id, card_loading("正在完善选题..."))
             threading.Thread(
                 target=do_develop_send,
-                args=(chat_id, audience, text)
+                args=(chat_id, audience, text, "", None, crop, scale, identity, intent)
             ).start()
-        elif flow == "task_morning":
-            send_card(chat_id, card_loading("正在分析任务优先级..."))
-            threading.Thread(target=do_morning_plan, args=(chat_id, text)).start()
-        elif flow == "task_add":
-            send_card(chat_id, card_loading("正在更新任务清单..."))
-            threading.Thread(target=do_add_task, args=(chat_id, text)).start()
-        elif flow == "task_goals":
-            send_card(chat_id, card_loading("正在整理目标..."))
-            threading.Thread(target=do_set_goals, args=(chat_id, text)).start()
 
         return jsonify({"code": 0})
 
     if text == "文案":
         send_card(chat_id, card_main_menu())
-    elif text == "任务":
-        send_card(chat_id, card_task_menu())
-    else:
-        threading.Thread(target=do_chat_reply, args=(chat_id, text)).start()
     return jsonify({"code": 0})
 
 
@@ -1018,13 +909,43 @@ def handle_card_action(action, chat_id, msg_id):
 
     elif act == "develop_audience":
         audience = action.get("audience")
-        template = TEMPLATE_DEVELOP_FARM if audience == "farmer" else TEMPLATE_DEVELOP_DEAL
-        label    = "种植户" if audience == "farmer" else "经销商"
+        if audience == "farmer":
+            update_card(msg_id, card_farmer_crop_select())
+        else:
+            pending_states[chat_id] = {
+                "flow": "develop", "audience": "dealer",
+                "expires": time.time() + STATE_TTL
+            }
+            update_card(msg_id, card_template_prompt("完善选题 · 面向经销商", TEMPLATE_DEVELOP_DEAL))
+
+    elif act == "develop_farmer_crop":
+        crop = action.get("crop", "")
+        update_card(msg_id, card_farmer_scale_select(crop))
+
+    elif act == "develop_farmer_scale":
+        crop  = action.get("crop", "")
+        scale = action.get("scale", "")
+        update_card(msg_id, card_farmer_identity_select(crop, scale))
+
+    elif act == "develop_farmer_identity":
+        crop     = action.get("crop", "")
+        scale    = action.get("scale", "")
+        identity = action.get("identity", "")
+        update_card(msg_id, card_farmer_intent_select(crop, scale, identity))
+
+    elif act == "develop_farmer_intent":
+        crop     = action.get("crop", "")
+        scale    = action.get("scale", "")
+        identity = action.get("identity", "")
+        intent   = action.get("intent", "")
+        template = TEMPLATE_DEVELOP_FARMER_PRODUCT if intent == "推产品" else TEMPLATE_DEVELOP_FARMER_BRAND
         pending_states[chat_id] = {
-            "flow": "develop", "audience": audience,
+            "flow": "develop", "audience": "farmer",
+            "crop": crop, "scale": scale, "identity": identity, "intent": intent,
             "expires": time.time() + STATE_TTL
         }
-        update_card(msg_id, card_template_prompt(f"完善选题 · 面向{label}", template))
+        label = f"{crop} · {scale} · {identity} · {intent}"
+        update_card(msg_id, card_template_prompt(f"完善选题 · {label}", template))
 
     elif act == "rewrite_audience":
         audience = action.get("audience")
@@ -1070,6 +991,10 @@ def handle_card_action(action, chat_id, msg_id):
         cache_key = action.get("cache_key", "")
         table_id  = action.get("table_id", BITABLE_DEVELOP_TABLE)
         audience  = action.get("audience", "farmer")
+        crop      = action.get("crop", "")
+        scale     = action.get("scale", "")
+        identity  = action.get("identity", "")
+        intent    = action.get("intent", "")
 
         content = get_develop_content(record_id, cache_key, table_id)
         if not content:
@@ -1079,32 +1004,8 @@ def handle_card_action(action, chat_id, msg_id):
         update_card(msg_id, card_loading("正在生成脚本..."))
         threading.Thread(
             target=do_generate_script,
-            args=(chat_id, content, record_id, table_id, audience)
+            args=(chat_id, content, record_id, table_id, audience, crop, scale, identity, intent)
         ).start()
-
-    elif act == "task_morning":
-        pending_states[chat_id] = {"flow": "task_morning", "expires": time.time() + STATE_TTL}
-        update_card(msg_id, card_template_prompt(
-            "早间计划",
-            "把今天要做的事一次发过来，一行一条，不用排序，想到什么写什么。"
-        ))
-
-    elif act == "task_add":
-        pending_states[chat_id] = {"flow": "task_add", "expires": time.time() + STATE_TTL}
-        update_card(msg_id, card_template_prompt(
-            "添加任务",
-            "（发送要添加的任务）"
-        ))
-
-    elif act == "task_view":
-        update_card(msg_id, card_task_view(chat_id))
-
-    elif act == "task_goals":
-        pending_states[chat_id] = {"flow": "task_goals", "expires": time.time() + STATE_TTL}
-        update_card(msg_id, card_template_prompt(
-            "设置目标",
-            "把你的目标用自己的话说出来，月度目标、本周重点都行，AI 帮你整理成结构化格式。"
-        ))
 
 
 @app.route("/card", methods=["POST"])

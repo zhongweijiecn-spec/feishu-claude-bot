@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local files
+test.py
+latest
+anthropic_beta_strip_proxy.js
+
+# Environment (if you have a local .env)
+.env
