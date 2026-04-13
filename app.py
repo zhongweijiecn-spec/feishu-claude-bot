@@ -544,7 +544,6 @@ def do_script_send(chat_id, audience, user_input, topic_record_id="", table_id=N
 # ── 去重（LRU 淘汰，避免全量 clear 导致重复处理）──────────────
 _DEDUP_MAX = 500
 processed_events = OrderedDict()      # event_id -> True
-processed_card_actions = OrderedDict() # msg_id -> timestamp
 
 # ── 路由 ─────────────────────────────────────────────────────
 @app.route("/", methods=["GET"])
@@ -609,53 +608,49 @@ def webhook():
     return jsonify({"code": 0})
 
 
-def handle_card_action(action, chat_id, msg_id):
+def handle_card_action(action, chat_id):
+    """处理卡片动作，返回下一步的卡片（供 /card 回调直接返回给飞书）。
+    返回 None 表示不更新卡片。"""
     act = action.get("action")
+    print(f"[card] act={act} chat_id={chat_id} action={action}", flush=True)
 
     if act == "cancel":
         pending_states.pop(chat_id, None)
-        update_card(msg_id, card_main_menu())
+        return card_main_menu()
 
-    elif act == "rewrite":
-        update_card(msg_id, card_audience_select("rewrite"))
+    if act == "rewrite":
+        return card_audience_select("rewrite")
 
-    elif act == "brainstorm":
-        update_card(msg_id, card_audience_select("brainstorm"))
+    if act == "brainstorm":
+        return card_audience_select("brainstorm")
 
-    elif act == "develop":
-        update_card(msg_id, card_audience_select("develop"))
+    if act == "develop":
+        return card_audience_select("develop")
 
-    elif act == "brainstorm_audience":
-        audience = action.get("audience")
-        update_card(msg_id, card_content_types(audience))
+    if act == "brainstorm_audience":
+        return card_content_types(action.get("audience"))
 
-    elif act == "develop_audience":
+    if act == "develop_audience":
         audience = action.get("audience")
         if audience == "farmer":
-            update_card(msg_id, card_farmer_crop_select())
-        else:
-            pending_states[chat_id] = {
-                "flow": "develop", "audience": "dealer",
-                "expires": time.time() + STATE_TTL
-            }
-            update_card(msg_id, card_template_prompt("完善选题 · 面向经销商", TEMPLATE_DEVELOP_DEAL))
+            return card_farmer_crop_select()
+        pending_states[chat_id] = {
+            "flow": "develop", "audience": "dealer",
+            "expires": time.time() + STATE_TTL
+        }
+        return card_template_prompt("完善选题 · 面向经销商", TEMPLATE_DEVELOP_DEAL)
 
-    elif act == "develop_farmer_crop":
-        crop = action.get("crop", "")
-        update_card(msg_id, card_farmer_scale_select(crop))
+    if act == "develop_farmer_crop":
+        return card_farmer_scale_select(action.get("crop", ""))
 
-    elif act == "develop_farmer_scale":
-        crop  = action.get("crop", "")
-        scale = action.get("scale", "")
-        update_card(msg_id, card_farmer_identity_select(crop, scale))
+    if act == "develop_farmer_scale":
+        return card_farmer_identity_select(action.get("crop", ""), action.get("scale", ""))
 
-    elif act == "develop_farmer_identity":
-        crop     = action.get("crop", "")
-        scale    = action.get("scale", "")
-        identity = action.get("identity", "")
-        update_card(msg_id, card_farmer_intent_select(crop, scale, identity))
+    if act == "develop_farmer_identity":
+        return card_farmer_intent_select(
+            action.get("crop", ""), action.get("scale", ""), action.get("identity", ""))
 
-    elif act == "develop_farmer_intent":
+    if act == "develop_farmer_intent":
         crop     = action.get("crop", "")
         scale    = action.get("scale", "")
         identity = action.get("identity", "")
@@ -667,18 +662,18 @@ def handle_card_action(action, chat_id, msg_id):
             "expires": time.time() + STATE_TTL
         }
         label = f"{crop} · {scale} · {identity} · {intent}"
-        update_card(msg_id, card_template_prompt(f"完善选题 · {label}", template))
+        return card_template_prompt(f"完善选题 · {label}", template)
 
-    elif act == "rewrite_audience":
+    if act == "rewrite_audience":
         audience = action.get("audience")
         label    = "种植户" if audience == "farmer" else "经销商"
         pending_states[chat_id] = {
             "flow": "rewrite", "audience": audience,
             "expires": time.time() + STATE_TTL
         }
-        update_card(msg_id, card_template_prompt(f"改文案 · 面向{label}", "（直接把要改的文案发过来）"))
+        return card_template_prompt(f"改文案 · 面向{label}", "（直接把要改的文案发过来）")
 
-    elif act == "brainstorm_type":
+    if act == "brainstorm_type":
         audience     = action.get("audience")
         content_type = action.get("type")
         templates    = TEMPLATES_FARM if audience == "farmer" else TEMPLATES_DEAL
@@ -688,9 +683,9 @@ def handle_card_action(action, chat_id, msg_id):
             "flow": "brainstorm", "audience": audience,
             "content_type": content_type, "expires": time.time() + STATE_TTL
         }
-        update_card(msg_id, card_template_prompt(f"{content_type} · 面向{label}", template))
+        return card_template_prompt(f"{content_type} · 面向{label}", template)
 
-    elif act == "deepen":
+    if act == "deepen":
         record_id = action.get("record_id", "")
         cache_key = action.get("cache_key", "")
         topic_idx = action.get("topic_idx", 0)
@@ -698,15 +693,16 @@ def handle_card_action(action, chat_id, msg_id):
 
         content = get_topic_content(record_id, cache_key, topic_idx)
         if not content:
-            update_card(msg_id, card_result("已过期", "请重新发起头脑风暴"))
-            return
+            return card_result("已过期", "请重新发起头脑风暴")
 
-        update_card(msg_id, card_loading("正在生成脚本..."))
-        # 头脑风暴链路：脚本写入头脑风暴表
+        # 深化需要后台 AI 生成，先返回 loading 卡片，后台线程完成后发送新卡片
         threading.Thread(
             target=do_script_send,
             args=(chat_id, audience, content, record_id, BITABLE_TOPIC_TABLE)
         ).start()
+        return card_loading("正在生成脚本...")
+
+    return None
 
 
 @app.route("/card", methods=["POST"])
@@ -718,20 +714,13 @@ def card_action():
 
     action  = data.get("action", {}).get("value", {})
     chat_id = data.get("open_chat_id", "")
-    msg_id  = data.get("open_message_id", "")
+    print(f"[card] action={action} chat_id={chat_id}", flush=True)
 
-    # 卡片动作去重：同一张卡片 2 秒内只处理一次
-    now = time.time()
-    dedup_key = f"{msg_id}:{json.dumps(action, sort_keys=True)}"
-    last_ts = processed_card_actions.get(dedup_key, 0)
-    if now - last_ts < 2:
-        return jsonify({"code": 0})
-    processed_card_actions[dedup_key] = now
-    while len(processed_card_actions) > _DEDUP_MAX:
-        processed_card_actions.popitem(last=False)
-
-    threading.Thread(target=handle_card_action, args=(action, chat_id, msg_id)).start()
-    return jsonify({"code": 0})
+    # 同步处理卡片动作，直接返回新卡片给飞书（比异步 PATCH 更可靠）
+    card = handle_card_action(action, chat_id)
+    if card:
+        return jsonify(card)
+    return jsonify({})
 
 
 if __name__ == "__main__":
