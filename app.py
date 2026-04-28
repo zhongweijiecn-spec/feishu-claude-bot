@@ -125,7 +125,7 @@ def parse_brainstorm(text):
         block = block.strip()
         if not block:
             continue
-        label_match = re.search(r'按钮标签[：:]\s*(.+)', block)
+        label_match = re.search(r'(?:按钮标签|选题名称)[：:]\s*(.+)', block)
         label = label_match.group(1).strip() if label_match else block[:12]
         topics.append((label, block))
     return topics[:3]
