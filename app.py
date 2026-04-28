@@ -302,14 +302,14 @@ def card_main_menu():
         "elements": [
             {"tag": "div", "text": {"tag": "lark_md", "content": "**请选择功能：**"}},
             {"tag": "action", "actions": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": "📢 产品推广"},
+                 "type": "primary", "value": {"action": "product_promo"}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "✏️ 改文案"},
-                 "type": "primary", "value": {"action": "rewrite"}},
+                 "type": "default", "value": {"action": "rewrite"}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "💡 头脑风暴"},
                  "type": "default", "value": {"action": "brainstorm"}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "🔍 完善选题"},
                  "type": "default", "value": {"action": "develop"}},
-                {"tag": "button", "text": {"tag": "plain_text", "content": "📢 产品推广"},
-                 "type": "default", "value": {"action": "product_promo"}},
             ]}
         ]
     }
