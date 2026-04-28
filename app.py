@@ -735,6 +735,26 @@ def do_product_script_send(chat_id, product_id, crop, audience, identity, angle,
         current_period = _get_current_seasonal_tip()
         if current_period and current_period in tips:
             context_lines.append(f"当前推广重点：{tips[current_period]}")
+        # 当前运营困境与策略（有关键信息时加入）
+        ctx = p.get("current_context", {})
+        if ctx:
+            context_lines.append("")
+            context_lines.append("=== 当前运营背景（必须严格遵守）===")
+            if ctx.get("timing"):
+                context_lines.append(f"时间节点：{ctx['timing']}")
+            if ctx.get("situation"):
+                context_lines.append(f"当前困境：{ctx['situation']}")
+            if ctx.get("next_window"):
+                context_lines.append(f"下一窗口：{ctx['next_window']}")
+            if ctx.get("strategy"):
+                context_lines.append(f"内容策略：{ctx['strategy']}")
+            assets = ctx.get("assets", [])
+            if assets:
+                context_lines.append(f"可用素材：{'；'.join(assets)}")
+            guidance = ctx.get("content_guidance", {})
+            if audience in guidance:
+                context_lines.append(f"写作要求：{guidance[audience]}")
+            context_lines.append("=================================")
 
         context_lines.extend([
             "",
