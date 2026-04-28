@@ -49,6 +49,24 @@ SKILL_BRAINSTORM_FARM        = load_skill("brainstorm-topics")
 SKILL_BRAINSTORM_DEAL        = load_skill("brainstorm-dealers")
 SKILL_SCRIPT_FARM            = load_skill("script-farmer")
 SKILL_SCRIPT_DEAL            = load_skill("script-dealer")
+SKILL_PRODUCT_PAIN           = load_skill("script-product-pain")
+SKILL_PRODUCT_ITCH           = load_skill("script-product-itch")
+SKILL_PRODUCT_STORY          = load_skill("script-product-story")
+
+# ── 加载产品配置 ────────────────────────────────────────────
+def load_products():
+    path = os.path.join(os.path.dirname(__file__), "products.json")
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+PRODUCTS = load_products()
+
+# 作物 emoji 映射
+CROP_EMOJI = {
+    "小麦": "🌾", "玉米": "🌽", "水稻": "🌾",
+    "花生": "🥜", "大豆": "🫘", "瓜果蔬菜": "🥦",
+    "棉花": "🫘",
+}
 
 # ── 飞书多维表格配置 ─────────────────────────────────────────
 BITABLE_APP_TOKEN     = os.environ.get("BITABLE_APP_TOKEN", "")
@@ -290,6 +308,8 @@ def card_main_menu():
                  "type": "default", "value": {"action": "brainstorm"}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "🔍 完善选题"},
                  "type": "default", "value": {"action": "develop"}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "📢 产品推广"},
+                 "type": "default", "value": {"action": "product_promo"}},
             ]}
         ]
     }
@@ -444,6 +464,144 @@ def card_brainstorm_result(header, full_text, topics, cache_key, audience, recor
     return {"config": {"wide_screen_mode": True}, "elements": elements}
 
 
+# ── 产品推广卡片 ──────────────────────────────────────────────
+def card_product_select():
+    buttons = []
+    for pid, p in PRODUCTS.items():
+        emoji = p.get("emoji", "📦")
+        buttons.append({
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": f"{emoji} {p['name']}"},
+            "type": "default",
+            "value": {"action": "product_promo_product", "product_id": pid}
+        })
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": "**产品推广 · 选择产品**"}},
+            {"tag": "action", "actions": buttons},
+        ]
+    }
+
+def card_product_crop_select(product_id):
+    p = PRODUCTS.get(product_id)
+    if not p:
+        return card_result("出错了", "产品不存在")
+    crops = p.get("crops", [])
+    def btn(crop):
+        emoji = CROP_EMOJI.get(crop, "🌱")
+        return {"tag": "button", "text": {"tag": "plain_text", "content": f"{emoji} {crop}"},
+                "type": "default", "value": {"action": "product_promo_crop", "product_id": product_id, "crop": crop}}
+    # 每行3个按钮
+    elements = [{"tag": "div", "text": {"tag": "lark_md", "content": f"**产品推广 · {p['name']} · 选择作物**"}}]
+    for i in range(0, len(crops), 3):
+        elements.append({"tag": "action", "actions": [btn(c) for c in crops[i:i+3]]})
+    return {"config": {"wide_screen_mode": True}, "elements": elements}
+
+def card_product_audience_select(product_id, crop):
+    p = PRODUCTS.get(product_id, {})
+    def btn(label, audience):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "default",
+                "value": {"action": "product_promo_audience",
+                          "product_id": product_id, "crop": crop, "audience": audience}}
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md",
+             "content": f"**产品推广 · {p.get('name', '')} · {crop} · 选择受众**"}},
+            {"tag": "action", "actions": [
+                btn("🌾 种植大户", "farmer"), btn("🏪 经销商", "dealer")
+            ]},
+        ]
+    }
+
+def card_product_identity_select(product_id, crop, audience):
+    p = PRODUCTS.get(product_id, {})
+    def btn(label, identity):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": label},
+                "type": "default",
+                "value": {"action": "product_promo_identity",
+                          "product_id": product_id, "crop": crop,
+                          "audience": audience, "identity": identity}}
+    label = "种植大户" if audience == "farmer" else "经销商"
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md",
+             "content": f"**产品推广 · {p.get('name', '')} · {crop} · {label} · 发布者身份**"}},
+            {"tag": "action", "actions": [btn("业务员", "业务员"), btn("经销商", "经销商"), btn("技术员", "技术员")]},
+        ]
+    }
+
+def card_product_angle_select(product_id, crop, audience, identity):
+    p = PRODUCTS.get(product_id, {})
+    def btn(text, angle):
+        return {"tag": "button", "text": {"tag": "plain_text", "content": text},
+                "type": "default",
+                "value": {"action": "product_promo_angle",
+                          "product_id": product_id, "crop": crop,
+                          "audience": audience, "identity": identity, "angle": angle}}
+    label = "种植大户" if audience == "farmer" else "经销商"
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md",
+             "content": f"**产品推广 · {p.get('name', '')} · {crop} · {label} · {identity} · 选择切入角度**"}},
+            {"tag": "action", "actions": [
+                btn("🎯 痛点", "痛点"), btn("✨ 痒点", "痒点"), btn("📖 故事", "故事")
+            ]},
+        ]
+    }
+
+def _get_current_seasonal_tip():
+    """根据当前月份返回 seasonal_tips 中的提示"""
+    month = time.localtime().tm_mon
+    month_map = {
+        4: "4-5月", 5: "4-5月",
+        6: "6-7月", 7: "6-7月",
+        8: "8-9月", 9: "8-9月",
+        10: "10-11月", 11: "10-11月",
+    }
+    return month_map.get(month, "")
+
+def card_product_input_prompt(product_id, crop, audience, identity, angle):
+    p = PRODUCTS.get(product_id)
+    if not p:
+        return card_result("出错了", "产品不存在")
+    label = "种植大户" if audience == "farmer" else "经销商"
+    # 构建预填的产品信息
+    functions_str = "\n".join([f"• {f}" for f in p.get("functions", [])])
+    seasonal_tip = ""
+    tips = p.get("seasonal_tips", {})
+    current_period = _get_current_seasonal_tip()
+    if current_period and current_period in tips:
+        seasonal_tip = f"\n当前推广重点：{tips[current_period]}"
+    prefilled = (
+        f"产品：{p['full_name']}\n"
+        f"研发背景：{p['research']}\n"
+        f"核心成分：{p['ingredients']}\n"
+        f"配方：{p['formula']}\n"
+        f"主要功能：\n{functions_str}\n"
+        f"使用方法：{p['usage']}\n"
+        f"{seasonal_tip}\n"
+        f"\n"
+        f"已选参数：\n"
+        f"• 作物：{crop}\n"
+        f"• 目标受众：{label}\n"
+        f"• 发布者身份：{identity}\n"
+        f"• 切入点：{angle}\n"
+        f"\n"
+        f"请补充以下信息（越具体效果越好）：\n"
+        f"推广场景（如：春季追肥/药害急救/抗旱保收）：\n"
+        f"想强调的卖点（可选，默认用产品核心卖点）：\n"
+        f"地区（可选）：\n"
+        f"补充信息（可选）："
+    )
+    title = f"产品推广 · {p['name']} · {crop} · {label} · {identity} · {angle}"
+    return card_template_prompt(title, prefilled)
+
+
 # ── 后台任务 ─────────────────────────────────────────────────
 def do_rewrite_send(chat_id, text, audience="farmer"):
     try:
@@ -541,6 +699,88 @@ def do_script_send(chat_id, audience, user_input, topic_record_id="", table_id=N
     except Exception as e:
         send_card(chat_id, card_result("出错了", str(e)))
 
+def do_product_script_send(chat_id, product_id, crop, audience, identity, angle, user_input):
+    """产品推广脚本生成：按角度选 skill，拼接产品上下文后调用 AI"""
+    try:
+        p = PRODUCTS.get(product_id)
+        if not p:
+            send_card(chat_id, card_result("出错了", "产品不存在"))
+            return
+
+        # 1. 选择 skill
+        skill_map = {"痛点": SKILL_PRODUCT_PAIN, "痒点": SKILL_PRODUCT_ITCH, "故事": SKILL_PRODUCT_STORY}
+        skill = skill_map.get(angle, SKILL_PRODUCT_PAIN)
+
+        # 2. 构建产品上下文
+        label = "种植大户" if audience == "farmer" else "经销商"
+        functions_str = "、".join(p.get("functions", []))
+        context_lines = [
+            f"产品：{p['full_name']}",
+            f"研发背景：{p['research']}",
+            f"核心成分：{p['ingredients']}",
+            f"配方：{p['formula']}",
+            f"功效：{functions_str}",
+            f"用法：{p['usage']}",
+        ]
+        # 效果实证（有数据时加入）
+        proof_points = p.get("proof_points", [])
+        if proof_points:
+            context_lines.append(f"效果实证：{'；'.join(proof_points)}")
+        # 亩均成本（有数据时加入）
+        cost = p.get("cost_per_mu", "")
+        if cost:
+            context_lines.append(f"亩均成本：{cost}")
+        # 时令提示（有匹配时加入）
+        tips = p.get("seasonal_tips", {})
+        current_period = _get_current_seasonal_tip()
+        if current_period and current_period in tips:
+            context_lines.append(f"当前推广重点：{tips[current_period]}")
+
+        context_lines.extend([
+            "",
+            f"作物：{crop}",
+            f"受众：{label}",
+            f"发布者身份：{identity}",
+            f"切入角度：{angle}",
+            "",
+            f"用户补充：{user_input}",
+        ])
+        context = "\n".join(context_lines)
+
+        # 3. 第一趟：skill 生成脚本
+        draft = ai_call(skill, context)
+        draft_main, draft_extra = split_extra_output(draft)
+
+        # 4. 第二趟：humanizer 去 AI 味
+        humanizer_input = (
+            "注意：这是短视频脚本，第一句是刻意设计的钩子，"
+            "去AI味时保留其直接性和冲击力，不要改成平淡的开场白。"
+            "严格控制在400字以内。\n\n"
+            + draft_main
+        )
+        result = ai_call(SKILL_HUMANIZER, humanizer_input) + draft_extra
+
+        # 5. 保存到 Bitable（复用 BITABLE_DEVELOP_TABLE，加流程字段区分）
+        if USE_BITABLE and BITABLE_DEVELOP_TABLE:
+            try:
+                extra = parse_extra_output(result)
+                fields = {
+                    "最终脚本": result,
+                    "受众": label,
+                    "流程": "产品推广",
+                    "产品": p["name"],
+                    "切入角度": angle,
+                }
+                fields.update(extra)
+                bitable_create(BITABLE_DEVELOP_TABLE, fields)
+            except Exception as e:
+                print(f"[bitable] product script save failed: {e}", flush=True)
+
+        # 6. 发送结果
+        send_card(chat_id, card_result(f"产品推广脚本 · {p['name']} · {angle}（面向{label}）", result))
+    except Exception as e:
+        send_card(chat_id, card_result("出错了", str(e)))
+
 # ── 去重（LRU 淘汰，避免全量 clear 导致重复处理）──────────────
 _DEDUP_MAX = 500
 processed_events = OrderedDict()      # event_id -> True
@@ -599,6 +839,16 @@ def webhook():
             threading.Thread(
                 target=do_script_send,
                 args=(chat_id, audience, text, "", None, crop, scale, identity, intent)
+            ).start()
+        elif flow == "product_promo":
+            product_id = state.get("product_id", "")
+            crop       = state.get("crop", "")
+            identity   = state.get("identity", "")
+            angle      = state.get("angle", "痛点")
+            send_card(chat_id, card_loading("正在生成产品推广脚本..."))
+            threading.Thread(
+                target=do_product_script_send,
+                args=(chat_id, product_id, crop, audience, identity, angle, text)
             ).start()
 
         return jsonify({"code": 0})
@@ -701,6 +951,42 @@ def handle_card_action(action, chat_id):
             args=(chat_id, audience, content, record_id, BITABLE_TOPIC_TABLE)
         ).start()
         return card_loading("正在生成脚本...")
+
+    if act == "product_promo":
+        return card_product_select()
+
+    if act == "product_promo_product":
+        return card_product_crop_select(action.get("product_id"))
+
+    if act == "product_promo_crop":
+        return card_product_audience_select(
+            action.get("product_id"), action.get("crop"))
+
+    if act == "product_promo_audience":
+        return card_product_identity_select(
+            action.get("product_id"), action.get("crop"), action.get("audience"))
+
+    if act == "product_promo_identity":
+        return card_product_angle_select(
+            action.get("product_id"), action.get("crop"),
+            action.get("audience"), action.get("identity"))
+
+    if act == "product_promo_angle":
+        product_id = action.get("product_id")
+        crop       = action.get("crop")
+        audience   = action.get("audience")
+        identity   = action.get("identity")
+        angle      = action.get("angle")
+        pending_states[chat_id] = {
+            "flow": "product_promo",
+            "product_id": product_id,
+            "crop": crop,
+            "audience": audience,
+            "identity": identity,
+            "angle": angle,
+            "expires": time.time() + STATE_TTL,
+        }
+        return card_product_input_prompt(product_id, crop, audience, identity, angle)
 
     return None
 
