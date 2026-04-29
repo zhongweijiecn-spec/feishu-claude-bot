@@ -53,6 +53,7 @@ SKILL_SCRIPT_DEAL            = load_skill("script-dealer")
 SKILL_PRODUCT_PAIN           = load_skill("script-product-pain")
 SKILL_PRODUCT_ITCH           = load_skill("script-product-itch")
 SKILL_PRODUCT_STORY          = load_skill("script-product-story")
+SKILL_PRODUCT_AD             = load_skill("script-product-ad")
 
 # ── 加载产品配置 ────────────────────────────────────────────
 def load_products():
@@ -567,7 +568,7 @@ def _get_current_seasonal_tip():
     return month_map.get(month, "")
 
 def card_product_draw_or_custom(product_id, crop, audience, identity, angle):
-    """角度选完后，提供抽卡和定制两个入口"""
+    """角度选完后，提供抽卡、定制、广告三个入口"""
     p = PRODUCTS.get(product_id, {})
     label = "种植大户" if audience == "farmer" else "经销商"
     skip_sps = (p.get("current_context") or {}).get("skip_selling_points", [])
@@ -586,6 +587,8 @@ def card_product_draw_or_custom(product_id, crop, audience, identity, angle):
                  "type": "primary", "value": {**base_val, "action": "product_promo_draw"}},
                 {"tag": "button", "text": {"tag": "plain_text", "content": "✏️ 定制"},
                  "type": "default", "value": {**base_val, "action": "product_promo_custom"}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "📢 广告"},
+                 "type": "default", "value": {**base_val, "action": "product_promo_ad"}},
             ]},
         ]
     }
@@ -735,7 +738,7 @@ def do_product_script_send(chat_id, product_id, crop, audience, identity, angle,
             return
 
         # 1. 选择 skill
-        skill_map = {"痛点": SKILL_PRODUCT_PAIN, "痒点": SKILL_PRODUCT_ITCH, "故事": SKILL_PRODUCT_STORY}
+        skill_map = {"痛点": SKILL_PRODUCT_PAIN, "痒点": SKILL_PRODUCT_ITCH, "故事": SKILL_PRODUCT_STORY, "广告": SKILL_PRODUCT_AD}
         skill = skill_map.get(angle, SKILL_PRODUCT_PAIN)
 
         # 2. 构建产品上下文
@@ -1086,6 +1089,24 @@ def handle_card_action(action, chat_id):
             args=(chat_id, product_id, crop, audience, identity, angle, user_input)
         ).start()
         return card_loading("正在生成产品推广脚本...")
+
+    if act == "product_promo_ad":
+        product_id = action.get("product_id")
+        crop       = action.get("crop")
+        audience   = action.get("audience")
+        identity   = action.get("identity")
+        pending_states.pop(chat_id, None)  # 广告不需要用户再打字
+        ad_hooks = [
+            "用产量数据切入",
+            "用田间对比切入",
+            "用算账切入",
+        ]
+        user_input = f"切入方式：{random.choice(ad_hooks)}"
+        threading.Thread(
+            target=do_product_script_send,
+            args=(chat_id, product_id, crop, audience, identity, "广告", user_input)
+        ).start()
+        return card_loading("正在生成广告文案...")
 
     return None
 
