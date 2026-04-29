@@ -571,7 +571,7 @@ def card_product_input_prompt(product_id, crop, audience, identity, angle):
         return card_result("出错了", "产品不存在")
     label = "种植大户" if audience == "farmer" else "经销商"
     # 构建预填的产品信息
-    functions_str = "\n".join([f"• {f}" for f in p.get("functions", [])])
+    selling_points_str = "\n".join([f"• {sp}" for sp in p.get("selling_points", [])])
     seasonal_tip = ""
     tips = p.get("seasonal_tips", {})
     current_period = _get_current_seasonal_tip()
@@ -582,7 +582,7 @@ def card_product_input_prompt(product_id, crop, audience, identity, angle):
         f"研发背景：{p['research']}\n"
         f"核心成分：{p['ingredients']}\n"
         f"配方：{p['formula']}\n"
-        f"主要功能：\n{functions_str}\n"
+        f"核心卖点：\n{selling_points_str}\n"
         f"使用方法：{p['usage']}\n"
         f"{seasonal_tip}\n"
         f"\n"
@@ -713,15 +713,19 @@ def do_product_script_send(chat_id, product_id, crop, audience, identity, angle,
 
         # 2. 构建产品上下文
         label = "种植大户" if audience == "farmer" else "经销商"
-        functions_str = "、".join(p.get("functions", []))
+        selling_points_str = "、".join(p.get("selling_points", []))
         context_lines = [
             f"产品：{p['full_name']}",
             f"研发背景：{p['research']}",
             f"核心成分：{p['ingredients']}",
             f"配方：{p['formula']}",
-            f"功效：{functions_str}",
+            f"核心卖点：{selling_points_str}",
             f"用法：{p['usage']}",
         ]
+        # 文案指导（有数据时加入）
+        guidance = p.get("copy_guidance", "")
+        if guidance:
+            context_lines.append(f"文案指导：{guidance}")
         # 效果实证（有数据时加入）
         proof_points = p.get("proof_points", [])
         if proof_points:
