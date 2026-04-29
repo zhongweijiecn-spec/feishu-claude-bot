@@ -1064,7 +1064,21 @@ def handle_card_action(action, chat_id):
         active_sps = [sp for sp in p.get("selling_points", []) if sp not in skip_sps]
         if active_sps:
             picked = random.choice(active_sps)
-            user_input = f"重点卖点：{picked}"
+            scenes = [
+                "从田埂上两片麦田对比切入——同样的品种，隔着一条埂，产量差了一截",
+                "从马上收割算一笔产量账切入——不用测产，数一数穗粒数就算出来了",
+                "从收购点老板说的一句话切入——去年收粮时他注意到了什么",
+                "从农户算账后悔切入——没用的人发现自己少收了多少斤",
+                "从老把式的经验切入——种了几十年地的人，一眼看出了区别",
+            ]
+            vibes = [
+                "像技术员在地头帮农户分析，用数据说话",
+                "像老农资人饭后聊天，话糙理不糙",
+                "像亲眼看到后忍不住想告诉别人的感觉",
+            ]
+            scene = random.choice(scenes)
+            vibe = random.choice(vibes)
+            user_input = f"切入场景：{scene}  风格：{vibe}  重点卖点：{picked}"
         else:
             user_input = ""
         threading.Thread(
