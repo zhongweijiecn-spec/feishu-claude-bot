@@ -3,6 +3,7 @@ import re
 import json
 import threading
 import time
+import random
 from collections import OrderedDict
 import requests
 from flask import Flask, request, jsonify
@@ -565,13 +566,39 @@ def _get_current_seasonal_tip():
     }
     return month_map.get(month, "")
 
+def card_product_draw_or_custom(product_id, crop, audience, identity, angle):
+    """角度选完后，提供抽卡和定制两个入口"""
+    p = PRODUCTS.get(product_id, {})
+    label = "种植大户" if audience == "farmer" else "经销商"
+    skip_sps = (p.get("current_context") or {}).get("skip_selling_points", [])
+    active_count = len([sp for sp in p.get("selling_points", []) if sp not in skip_sps])
+    base_val = {
+        "product_id": product_id, "crop": crop,
+        "audience": audience, "identity": identity, "angle": angle,
+    }
+    return {
+        "config": {"wide_screen_mode": True},
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md",
+             "content": f"**产品推广 · {p.get('name', '')} · {crop} · {label} · {identity} · {angle}**\n\n快速随机出稿，还是补充信息精细定制？"}},
+            {"tag": "action", "actions": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": f"🎲 抽卡"},
+                 "type": "primary", "value": {**base_val, "action": "product_promo_draw"}},
+                {"tag": "button", "text": {"tag": "plain_text", "content": "✏️ 定制"},
+                 "type": "default", "value": {**base_val, "action": "product_promo_custom"}},
+            ]},
+        ]
+    }
+
 def card_product_input_prompt(product_id, crop, audience, identity, angle):
     p = PRODUCTS.get(product_id)
     if not p:
         return card_result("出错了", "产品不存在")
     label = "种植大户" if audience == "farmer" else "经销商"
     # 构建预填的产品信息
-    selling_points_str = "\n".join([f"• {sp}" for sp in p.get("selling_points", [])])
+    skip_sps = (p.get("current_context") or {}).get("skip_selling_points", [])
+    active_sps = [sp for sp in p.get("selling_points", []) if sp not in skip_sps]
+    selling_points_str = "\n".join([f"• {sp}" for sp in active_sps])
     seasonal_tip = ""
     tips = p.get("seasonal_tips", {})
     current_period = _get_current_seasonal_tip()
@@ -713,7 +740,11 @@ def do_product_script_send(chat_id, product_id, crop, audience, identity, angle,
 
         # 2. 构建产品上下文
         label = "种植大户" if audience == "farmer" else "经销商"
-        selling_points_str = "、".join(p.get("selling_points", []))
+        # 按季节过滤卖点：当前禁用的从列表中移除
+        skip_sps = (p.get("current_context") or {}).get("skip_selling_points", [])
+        active_sps = [sp for sp in p.get("selling_points", []) if sp not in skip_sps]
+        selling_points_str = "、".join(active_sps)
+        skipped_str = "、".join(skip_sps)
         context_lines = [
             f"产品：{p['full_name']}",
             f"研发背景：{p['research']}",
@@ -759,6 +790,10 @@ def do_product_script_send(chat_id, product_id, crop, audience, identity, angle,
             if audience in guidance:
                 context_lines.append(f"写作要求：{guidance[audience]}")
             context_lines.append("=================================")
+            # 负向约束：明确告知此时禁用的卖点
+            if skip_sps:
+                context_lines.append("")
+                context_lines.append(f"注意：此时段禁止使用以下卖点（季节性不匹配）：{skipped_str}")
 
         context_lines.extend([
             "",
@@ -1010,7 +1045,33 @@ def handle_card_action(action, chat_id):
             "angle": angle,
             "expires": time.time() + STATE_TTL,
         }
-        return card_product_input_prompt(product_id, crop, audience, identity, angle)
+        return card_product_draw_or_custom(product_id, crop, audience, identity, angle)
+
+    if act == "product_promo_custom":
+        return card_product_input_prompt(
+            action.get("product_id"), action.get("crop"),
+            action.get("audience"), action.get("identity"), action.get("angle"))
+
+    if act == "product_promo_draw":
+        product_id = action.get("product_id")
+        crop       = action.get("crop")
+        audience   = action.get("audience")
+        identity   = action.get("identity")
+        angle      = action.get("angle")
+        pending_states.pop(chat_id, None)  # 抽卡不需要用户再打字，清理掉
+        p = PRODUCTS.get(product_id, {})
+        skip_sps = (p.get("current_context") or {}).get("skip_selling_points", [])
+        active_sps = [sp for sp in p.get("selling_points", []) if sp not in skip_sps]
+        if active_sps:
+            picked = random.choice(active_sps)
+            user_input = f"重点卖点：{picked}"
+        else:
+            user_input = ""
+        threading.Thread(
+            target=do_product_script_send,
+            args=(chat_id, product_id, crop, audience, identity, angle, user_input)
+        ).start()
+        return card_loading("正在生成产品推广脚本...")
 
     return None
 
