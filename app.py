@@ -50,6 +50,7 @@ SKILL_BRAINSTORM_FARM        = load_skill("brainstorm-topics")
 SKILL_BRAINSTORM_DEAL        = load_skill("brainstorm-dealers")
 SKILL_SCRIPT_FARM            = load_skill("script-farmer")
 SKILL_SCRIPT_DEAL            = load_skill("script-dealer")
+SKILL_SCRIPT_FACTORY_RECRUIT = load_skill("script-factory-recruit")
 SKILL_PRODUCT_PAIN           = load_skill("script-product-pain")
 SKILL_PRODUCT_ITCH           = load_skill("script-product-itch")
 SKILL_PRODUCT_STORY          = load_skill("script-product-story")
@@ -118,6 +119,7 @@ TEMPLATE_DEVELOP_FARM         = "话题方向：\n已有想法（没有就写「
 TEMPLATE_DEVELOP_FARMER_BRAND = "话题方向：\n已有想法（没有就写「无」）：\n地区（可选）："
 TEMPLATE_DEVELOP_FARMER_PRODUCT = "话题方向：\n产品名称：\n核心卖点（1-3条）：\n产品解决的痛点：\n地区（可选）："
 TEMPLATE_DEVELOP_DEAL         = "话题方向：\n已有想法（没有就写「无」）：\n地区（可选，默认江浙沪皖豫）："
+TEMPLATE_DEVELOP_FACTORY     = "话题方向：\n已有想法（没有就写「无」）：\n厂家核心优势（专利/产能/资质/研发，可选）：\n招商政策（区域保护/利润/门槛/退换货，可选）：\n经销商扶持（培训/物料/售后/动销，可选）：\n成功案例（可选）：\n目标地区（可选）："
 
 # ── 解析头脑风暴输出 ─────────────────────────────────────────
 def parse_brainstorm(text):
@@ -318,18 +320,23 @@ def card_main_menu():
 
 def card_audience_select(flow):
     titles = {"brainstorm": "头脑风暴 · 选择目标受众", "develop": "完善选题 · 选择目标受众", "rewrite": "改文案 · 选择目标受众"}
+    actions = [
+        {"tag": "button", "text": {"tag": "plain_text", "content": "🌾 面向种植户"},
+         "type": "primary",
+         "value": {"action": f"{flow}_audience", "audience": "farmer"}},
+        {"tag": "button", "text": {"tag": "plain_text", "content": "🏪 面向经销商"},
+         "type": "default",
+         "value": {"action": f"{flow}_audience", "audience": "dealer"}},
+    ]
+    if flow == "develop":
+        actions.append({"tag": "button", "text": {"tag": "plain_text", "content": "🏭 厂家招商"},
+                        "type": "default",
+                        "value": {"action": f"{flow}_audience", "audience": "factory"}})
     return {
         "config": {"wide_screen_mode": True},
         "elements": [
             {"tag": "div", "text": {"tag": "lark_md", "content": f"**{titles.get(flow, '请选择目标受众')}**"}},
-            {"tag": "action", "actions": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "🌾 面向种植户"},
-                 "type": "primary",
-                 "value": {"action": f"{flow}_audience", "audience": "farmer"}},
-                {"tag": "button", "text": {"tag": "plain_text", "content": "🏪 面向经销商"},
-                 "type": "default",
-                 "value": {"action": f"{flow}_audience", "audience": "dealer"}},
-            ]}
+            {"tag": "action", "actions": actions}
         ]
     }
 
@@ -692,8 +699,10 @@ def do_script_send(chat_id, audience, user_input, topic_record_id="", table_id=N
     try:
         if table_id is None:
             table_id = BITABLE_DEVELOP_TABLE
-        label = "种植户" if audience == "farmer" else "经销商"
-        skill = SKILL_SCRIPT_FARM if audience == "farmer" else SKILL_SCRIPT_DEAL
+        label_map = {"farmer": "种植户", "dealer": "经销商", "factory": "厂家招商"}
+        skill_map = {"farmer": SKILL_SCRIPT_FARM, "dealer": SKILL_SCRIPT_DEAL, "factory": SKILL_SCRIPT_FACTORY_RECRUIT}
+        label = label_map.get(audience, "经销商")
+        skill = skill_map.get(audience, SKILL_SCRIPT_DEAL)
 
         content_for_script = user_input
         if audience == "farmer" and any([crop, scale, identity, intent]):
@@ -946,6 +955,12 @@ def handle_card_action(action, chat_id):
         audience = action.get("audience")
         if audience == "farmer":
             return card_farmer_crop_select()
+        if audience == "factory":
+            pending_states[chat_id] = {
+                "flow": "develop", "audience": "factory",
+                "expires": time.time() + STATE_TTL
+            }
+            return card_template_prompt("完善选题 · 厂家招商", TEMPLATE_DEVELOP_FACTORY)
         pending_states[chat_id] = {
             "flow": "develop", "audience": "dealer",
             "expires": time.time() + STATE_TTL
